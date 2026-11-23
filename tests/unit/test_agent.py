@@ -93,7 +93,8 @@ def test_same_thread_keeps_history() -> None:
 
 def test_system_prompt_states_the_rules_that_tools_rely_on() -> None:
     prompt = agent.SYSTEM_PROMPT
-    for rule in ("evaluate_obligations", "Local", "unresolved", "Needs Confirmation", "Never convert time zones"):
+    for rule in ("evaluate_obligations", "Local", "unresolved", "Needs Confirmation", "Never convert time zones",
+                 "read-only", "basis", "Never name a tool"):
         assert rule in prompt
 
 

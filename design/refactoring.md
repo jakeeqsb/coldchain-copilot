@@ -75,31 +75,10 @@ knows each fact* changes.
 **Done when** the answer to "what must change to run a different domain?" is
 "JSON files, a few detectors, and documents", with no engine code in the list.
 
-## 3. Engineering Rules (draft)
+## 3. Engineering Rules
 
-Confirmed in step 0 and recorded in `decisions.md`.
-
-| Rule | Statement |
-|---|---|
-| A1 | Layers are `common → engine → tools → agent`; imports go downward only. Enforced by `tests/unit/test_layers.py`. |
-| A2 | One entrance per layer: the engine resolves names through `registry.py`; the LLM reaches data only through `tools/gateway.py`. |
-| B1 | Judgment logic (detection, thresholds, condition checks) lives only in the engine layer. Tools resolve scope, call, and shape results. |
-| B2 | The ontology holds names only; every name resolves in `registry.py` (checked by `catalog.py`, tested). |
-| B3 | A fact the ontology states is read from the ontology, not repeated in code (the guiding principle). |
-| C1 | A new file only for a new responsibility with its own name in the vocabulary (a layer, an ontology concept, an external dependency). Never split a file by size alone. |
-| C2 | One name, one meaning. |
-| D1 | Validate at boundaries only: `catalog.py` at seed time, tools at LLM input. |
-| D2 | `ToolError` becomes an error dict only in `tools/gateway.py`. |
-| D3 | UTC everywhere; KST display strings only in `tools/gateway.py`. |
-| E1 | Pure logic gets unit tests (no database); functions that touch the database get integration tests. |
-| F1 | External model providers are chosen by configuration, never by code. Provider SDKs (`voyageai`, `openai`, `langchain_*`) are imported only in their provider module (`embeddings.py`, `agent.py`). Enforced by `tests/unit/test_layers.py`. |
-| F2 | MongoDB is the platform, not a pluggable backend: no storage abstraction over aggregation, `$graphLookup`, or `$vectorSearch`. The only swappable data behaviour is graph traversal, through the traverser registry. |
-| G1 | The agent is a LangGraph `StateGraph`. What can be computed is a deterministic node; the LLM only chooses tools, judges open questions, and writes the answer. |
-
-Layer placement: `config`, `db`, `errors`, `embeddings` are common. `ontology`,
-`detection`, `rules`, `engine`, `registry`, `catalog`, and `ingest` are
-engine layer (`ingest` defines the `knowledge` chunk shape and index used by
-`tools/documents.py`, so it is not scripts-only).
+Confirmed in step 0 and recorded in [`decisions.md` § 7](./decisions.md#7-engineering-rules),
+which is the only copy. Rule names (A1, B3, F1, ...) are used below.
 
 ## 4. Steps
 
@@ -108,25 +87,47 @@ Each step is one reviewable change with its tests, and ends with a table of
 
 ### Step 0. Clean-up and rules (stage 5 leftovers)
 
-- [ ] `SYSTEM_PROMPT` in `agent.py`: the agent is read-only (never offers to
+- [x] `SYSTEM_PROMPT` in `agent.py`: the agent is read-only (never offers to
       send, notify, or change); "fact vs. condition" uses the clause `basis`
       (actual vs. required); cite documents, never tool names.
-- [ ] README: Quick Start uses `scripts/seed.py`, `scripts/ingest_docs.py`,
+- [x] README: Quick Start uses `scripts/seed.py`, `scripts/ingest_docs.py`,
       `coldchain-copilot -q`; requirements say only "MongoDB with Vector
       Search, reachable at `MONGODB_URI`" (how to run it is up to the user);
       Project Structure lists `agent.py`, `ingest.py`, and the 9 tools; remove
       the link to the missing `scaling.md`. The variable table is finished in
       step 1, when the names change.
-- [ ] README.ko.md: not restored now; rewrite after stage 6.
-- [ ] `decisions.md` § 7: engineering rules (§ 3 above).
-- [ ] `tests/unit/test_layers.py`: parse imports with `ast`, fail on an
+- [x] README.ko.md: not restored now; rewrite after stage 6.
+- [x] `decisions.md` § 7: engineering rules (rules A–G).
+- [x] `tests/unit/test_layers.py`: parse imports with `ast`, fail on an
       upward import (A1). The provider-SDK check (F1) is added in step 1.
-- [ ] Demo questions, once `.env` exists (compare with expected results):
+- [x] Demo questions, once `.env` exists (compare with expected results):
   - RF-03이 지금 싣고 있는 화물과 허용 온도 범위는?
   - FLEET-01에서 온도 이탈이 있었던 컨테이너와 원인은?
   - SHP-102 계약에서 온도 이탈이 나면 누구에게 언제까지 통보해야 해?
   - FLEET-01 현황 브리핑해줘
   - SHP-102는 Article 8이 왜 안 걸렸고, Article 6 다음엔 뭘 해야 해?
+
+Result (2026-11-23). All five answers match the expected engine results,
+with "fact vs. condition" from the basis ("24 min ≥ 15 min", "24 min < 30 min")
+and no tool names cited.
+
+FLEET-01 briefing, three runs per prompt:
+
+| Prompt | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Before step 0 | 28.0 s · 4 LLM · `get_clause` ×11 | 26.7 s · 4 LLM · ×11 | 20.6 s · 3 LLM · ×0 |
+| After step 0 | 30.9 s · 4 LLM · ×10 | 28.4 s · 4 LLM · ×11 | 36.0 s · 4 LLM · ×12 |
+
+The prompt change does not explain the latency: with either prompt the model
+usually calls `get_clause` ~11 times (~35k input tokens, ~28 s), and sometimes
+skips it (~19 s). An earlier single-run comparison (18.7 s before, 28.9 s
+after) was one such lucky run, not an effect. The cause is the one step 5 (B)
+addresses: `evaluate_obligations` returns only `chunkId`, so quoting a clause
+takes a `get_clause` round trip, and the results pile up in the context.
+Compare several runs, not one, when measuring step 5.
+
+Noted for later: clauses that mean "any occurrence" are written as
+`consecutiveMinutes ≥ 1`, which reads oddly in a briefing ("18 min ≥ 1 min").
 
 ### Step 1. Model providers chosen by configuration
 
@@ -379,7 +380,7 @@ equipment maintenance) should follow it in phase 1.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 | not started | clean-up and rules; demo questions wait for `.env` |
+| 0 | done | clean-up and rules; latency unchanged (see step 0 result) |
 | 1 | not started | model providers |
 | 2 | not started | objects through the ontology |
 | 3 | not started | causes as data |

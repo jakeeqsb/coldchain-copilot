@@ -6,7 +6,7 @@ Usage (from the repository root):
     uv run scripts/ingest_docs.py --dry-run  # chunk only; no API call, no writes
 
 Needs ``VOYAGE_API_KEY`` and a ``MONGODB_URI`` that supports Vector Search
-(Atlas, or the local Atlas container from ``make atlas``). Rerun it after
+(Atlas, or a local Atlas deployment). Rerun it after
 editing ``docs/`` or changing ``VOYAGE_EMBED_MODEL``.
 
 Steps:
