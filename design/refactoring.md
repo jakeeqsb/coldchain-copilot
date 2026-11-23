@@ -144,19 +144,19 @@ Noted for later: clauses that mean "any occurrence" are written as
  LLM_REASONING_EFFORT=low              (LangChain's standard factory)
 ```
 
-- [ ] `embeddings.py` (new file; rule C1: a new external dependency): an
+- [x] `embeddings.py` (new file; rule C1: a new external dependency): an
       `Embed` signature `(texts, kind) -> vectors` with `kind` in
       `document` / `query`, one small factory per provider, and an
       `EMBEDDERS` registry selected by `EMBEDDING_PROVIDER`. Functions, no
       class hierarchy.
-- [ ] `ingest.embed_chunks` and `tools/documents.embed_query` take an
+- [x] `ingest.embed_chunks` and `tools/documents.embed_query` take an
       `Embed` instead of building a Voyage client; tests pass a fake one.
-- [ ] Chat model from `init_chat_model(settings.llm_model, ...)`; no
+- [x] Chat model from `init_chat_model(settings.llm_model, ...)`; no
       `ChatOpenAI` import. Add `langchain` as a direct dependency (it is
       transitive today). Embeddings keep their own registry so the engine
       layer (`ingest`) does not depend on LangChain, and Voyage's
       `input_type` stays explicit.
-- [ ] Rename variables (breaking, done now while no `.env` exists):
+- [x] Rename variables (breaking, done now while no `.env` exists):
 
       | Old | New |
       |---|---|
@@ -167,11 +167,17 @@ Noted for later: clauses that mean "any occurrence" are written as
       API keys keep their provider names (`VOYAGE_API_KEY`,
       `OPENAI_API_KEY`), because the SDKs read them under those names.
       Update `config.py`, `.env.example`, and the README variable table.
-- [ ] Model mismatch guard: each chunk already stores `embeddingModel`.
+- [x] Model mismatch guard: each chunk already stores `embeddingModel`.
       `search_knowledge` returns `EVIDENCE_UNAVAILABLE` ("re-run
       ingest_docs.py") when it differs from the configured model, instead of
       comparing vectors from two models.
-- [ ] `test_layers.py`: provider SDKs imported only where F1 allows.
+- [x] `test_layers.py`: provider SDKs imported only where F1 allows.
+
+Result (2026-11-23). Checked live: ingestion through the injected Voyage
+embedder; a search with `EMBEDDING_MODEL=voyage-3.5` against `voyage-4`
+vectors returns `EVIDENCE_UNAVAILABLE`; the OpenAI embedder returns
+1536-dimension vectors; the agent answers through `init_chat_model`.
+`test_layers.py` fails when an SDK is imported outside its module.
 
 ### Step 2. Load objects through the ontology
 
@@ -381,7 +387,7 @@ equipment maintenance) should follow it in phase 1.
 | Step | Status | Notes |
 |---|---|---|
 | 0 | done | clean-up and rules; latency unchanged (see step 0 result) |
-| 1 | not started | model providers |
+| 1 | done | model providers |
 | 2 | not started | objects through the ontology |
 | 3 | not started | causes as data |
 | 4 | not started | catalog checks |

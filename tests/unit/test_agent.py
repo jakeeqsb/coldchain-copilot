@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from coldchain_copilot import agent
+from coldchain_copilot.config import Settings
 from coldchain_copilot.tools import gateway
 
 
@@ -162,3 +163,16 @@ def test_tool_calls_in_one_turn_run_concurrently(monkeypatch) -> None:
     assert peak[0] > 1
     results = [json.loads(m.content)["ok"] for m in state["messages"] if isinstance(m, ToolMessage)]
     assert results == [0, 1, 2, 3]  # call order is kept
+
+
+def test_chat_model_comes_from_llm_model_with_openai_options(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(agent, "init_chat_model", lambda model, **options: seen.append((model, options)))
+
+    agent.chat_model(Settings(mongodb_uri="x", llm_model="openai:gpt-6.1-terra", llm_reasoning_effort="low"))
+    agent.chat_model(Settings(mongodb_uri="x", llm_model="anthropic:claude-sonnet-5-5", llm_reasoning_effort="low"))
+
+    assert seen == [
+        ("openai:gpt-6.1-terra", {"use_responses_api": True, "reasoning": {"effort": "low"}}),
+        ("anthropic:claude-sonnet-5-5", {}),  # OpenAI-only options are not sent to other providers
+    ]

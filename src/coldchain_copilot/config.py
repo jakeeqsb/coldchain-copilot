@@ -32,13 +32,19 @@ class Settings:
     Attributes:
         mongodb_uri: Connection string for the MongoDB deployment.
         db_name: Database that holds all project collections.
-        voyage_api_key: Voyage AI key for embeddings, if set.
-        voyage_embed_model: Voyage model used for documents and queries.
-        openai_api_key: OpenAI key for the briefing LLM, if set.
-        openai_model: OpenAI chat model with tool calling.
-        openai_reasoning_effort: Reasoning effort sent with each model call
+        embedding_provider: Key of ``embeddings.EMBEDDERS`` (``voyage``,
+            ``openai``). Documents and queries use the same provider.
+        embedding_model: The provider's embedding model. Changing it means
+            running ``scripts/ingest_docs.py`` again.
+        llm_model: Chat model for the agent as ``provider:model``, the
+            format LangChain's ``init_chat_model`` takes (for example
+            ``openai:gpt-6.1-terra``). The model must support tool calling.
+        llm_reasoning_effort: Reasoning effort sent with each model call
             (e.g. ``none``, ``low``, ``medium``), or None for the model's own
             default. Lower is faster; check the briefing still holds up.
+            Applied to OpenAI models only.
+        voyage_api_key: Voyage AI key, if set.
+        openai_api_key: OpenAI key, if set.
         max_window_hours: Upper bound for fleet- or reefer-scoped sensor
             queries. Shipment-scoped queries use the shipment period instead.
         data_dir: Directory of the catalog JSON files. Relative paths
@@ -49,11 +55,12 @@ class Settings:
 
     mongodb_uri: str
     db_name: str = "coldchain_copilot"
+    embedding_provider: str = "voyage"
+    embedding_model: str = "voyage-4"
+    llm_model: str = "openai:gpt-6.1-terra"
+    llm_reasoning_effort: str | None = None
     voyage_api_key: str | None = None
-    voyage_embed_model: str = "voyage-4"
     openai_api_key: str | None = None
-    openai_model: str = "gpt-5-mini"
-    openai_reasoning_effort: str | None = None
     max_window_hours: int = 72
     data_dir: Path = Path("data")
     docs_dir: Path = Path("docs")
@@ -133,11 +140,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         mongodb_uri=_require("MONGODB_URI", get("MONGODB_URI")),
         db_name=get("DB_NAME") or defaults.db_name,
+        embedding_provider=get("EMBEDDING_PROVIDER") or defaults.embedding_provider,
+        embedding_model=get("EMBEDDING_MODEL") or defaults.embedding_model,
+        llm_model=get("LLM_MODEL") or defaults.llm_model,
+        llm_reasoning_effort=get("LLM_REASONING_EFFORT"),
         voyage_api_key=get("VOYAGE_API_KEY"),
-        voyage_embed_model=get("VOYAGE_EMBED_MODEL") or defaults.voyage_embed_model,
         openai_api_key=get("OPENAI_API_KEY"),
-        openai_model=get("OPENAI_MODEL") or defaults.openai_model,
-        openai_reasoning_effort=get("OPENAI_REASONING_EFFORT"),
         max_window_hours=_positive_int(
             "MAX_WINDOW_HOURS", env.get("MAX_WINDOW_HOURS"), defaults.max_window_hours
         ),

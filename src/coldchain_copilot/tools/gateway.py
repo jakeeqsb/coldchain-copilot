@@ -3,7 +3,7 @@
 Three jobs, in one place so every tool behaves the same:
 
 1. ``SCHEMAS`` describes each tool to the LLM in the OpenAI function-calling
-   format, which ``ChatOpenAI.bind_tools`` accepts as is. The descriptions
+   format, which a LangChain chat model's ``bind_tools`` accepts as is. The descriptions
    are the LLM's instructions for when to use a tool, so they are written
    for the model, not for developers.
 2. :func:`call` maps a tool name to its function and runs it with the
@@ -17,7 +17,7 @@ Typical usage from the agent:
 
     from coldchain_copilot.tools import gateway
 
-    llm = ChatOpenAI(model=...).bind_tools(gateway.SCHEMAS)
+    llm = chat_model(settings).bind_tools(gateway.SCHEMAS)
     result = gateway.call("find_excursions", {"fleet_id": "FLEET-01"})
 
 Not to be confused with ``coldchain_copilot.registry``, which maps ontology

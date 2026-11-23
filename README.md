@@ -196,7 +196,7 @@ The MVP keeps the ontology minimal: two class hierarchies (cargo, events), six r
 
 ## 4. Quick Start
 
-**Requirements:** [uv](https://docs.astral.sh/uv/), MongoDB with Vector Search reachable at `MONGODB_URI`, a Voyage AI API key (embeddings), an OpenAI API key (briefing LLM).
+**Requirements:** [uv](https://docs.astral.sh/uv/), MongoDB with Vector Search reachable at `MONGODB_URI`, and API keys for the embedding and chat model providers (by default Voyage AI and OpenAI).
 
 ```bash
 uv sync
@@ -213,11 +213,12 @@ uv run coldchain-copilot             # interactive mode
 |---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017` |
 | `DB_NAME` | `coldchain_copilot` |
+| `EMBEDDING_PROVIDER` | `voyage` (or `openai`); rerun `ingest_docs.py` after a change |
+| `EMBEDDING_MODEL` | `voyage-4` |
+| `LLM_MODEL` | `openai:gpt-6.1-terra` (`provider:model`, any model with tool calling) |
+| `LLM_REASONING_EFFORT` | `low` (optional; OpenAI models) |
 | `VOYAGE_API_KEY` | your Voyage AI key |
-| `VOYAGE_EMBED_MODEL` | `voyage-4` |
 | `OPENAI_API_KEY` | your OpenAI key |
-| `OPENAI_MODEL` | `gpt-6.1-terra` |
-| `OPENAI_REASONING_EFFORT` | `low` (optional) |
 | `MAX_WINDOW_HOURS` | `72` |
 | `DATA_DIR` | `data` |
 | `DOCS_DIR` | `docs` |
@@ -255,14 +256,14 @@ All companies, contracts, SOPs, and manuals are fictional demo material.
 The code is in four layers, and imports go downward only (`tests/unit/test_layers.py`):
 
 ```text
- common  →  engine  →  tools  →  agent
- config     ontology   gateway    agent.py
- db         detection  lookup
- errors     rules      sensor
-            engine     documents
-            registry   adhoc
-            catalog
-            ingest
+ common      →  engine     →  tools      →  agent
+ config         ontology      gateway       agent.py
+ db             detection     lookup
+ errors         rules         sensor
+ embeddings     engine        documents
+                registry      adhoc
+                catalog
+                ingest
 ```
 
 ```text
@@ -275,6 +276,7 @@ coldchain-copilot/
 │   └── ingest_docs.py     Chunk and embed docs/ into knowledge, build the vector index
 ├── src/coldchain_copilot/
 │   ├── config.py · db.py · errors.py
+│   ├── embeddings.py      Embedding providers chosen by EMBEDDING_PROVIDER (the only embedding SDK imports)
 │   ├── catalog.py         Check every name used by clauses and the ontology
 │   ├── ontology.py        Cargo classes, applicable clauses, dependent clauses ($graphLookup)
 │   ├── detection.py       Detector functions (MongoDB aggregation on readings)

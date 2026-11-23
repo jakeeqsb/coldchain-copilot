@@ -5,13 +5,15 @@ Usage (from the repository root):
     uv run scripts/ingest_docs.py            # chunk, embed, write, index
     uv run scripts/ingest_docs.py --dry-run  # chunk only; no API call, no writes
 
-Needs ``VOYAGE_API_KEY`` and a ``MONGODB_URI`` that supports Vector Search
-(Atlas, or a local Atlas deployment). Rerun it after
-editing ``docs/`` or changing ``VOYAGE_EMBED_MODEL``.
+Needs the API key of the configured ``EMBEDDING_PROVIDER`` and a
+``MONGODB_URI`` that supports Vector Search (Atlas, or a local Atlas
+deployment). Rerun it after editing ``docs/`` or changing
+``EMBEDDING_PROVIDER`` / ``EMBEDDING_MODEL``.
 
 Steps:
     1. Chunk every document in DOCS_DIR, one chunk per Article or Section.
-    2. Embed all chunks with Voyage in one request (input_type=document).
+    2. Embed all chunks in one request with the configured embedder
+       (kind="document").
     3. Replace the contents of ``knowledge``.
     4. Create the ``knowledge_vector`` index, or update it when it already
        exists (the dimensions follow the model), then wait until it can be
@@ -33,6 +35,7 @@ from pymongo.operations import SearchIndexModel
 
 from coldchain_copilot import db
 from coldchain_copilot.config import get_settings
+from coldchain_copilot.embeddings import get_embedder
 from coldchain_copilot.ingest import VECTOR_INDEX, chunk_documents, embed_chunks, vector_index_definition
 
 INDEX_WAIT_SECONDS = 180
@@ -52,9 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return 0
 
-    embedded = embed_chunks(chunks, api_key=settings.require_voyage_key(), model=settings.voyage_embed_model)
+    embedded = embed_chunks(chunks, embed=get_embedder(settings), model=settings.embedding_model)
     dimensions = len(embedded[0]["embedding"])
-    print(f"Embedded with {settings.voyage_embed_model} ({dimensions} dimensions)")
+    print(f"Embedded with {settings.embedding_provider}:{settings.embedding_model} ({dimensions} dimensions)")
 
     knowledge = db.collection(db.KNOWLEDGE)
     write_chunks(knowledge, embedded)

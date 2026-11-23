@@ -88,7 +88,7 @@ The code grew feature by feature, and the same knowledge ended up in more than o
 | **D2** | `ToolError` becomes an error dict only in `tools/gateway.py`. | review |
 | **D3** | UTC everywhere; KST display strings are made only in `tools/gateway.py`. | review |
 | **E1** | Pure logic gets unit tests (no database); functions that touch the database get integration tests. | review |
-| **F1** | External model providers (embeddings, chat model) are chosen by configuration, never by code; provider SDKs are imported only in their provider module. | review |
+| **F1** | External model providers (embeddings, chat model) are chosen by configuration, never by code; provider SDKs are imported only in their provider module (`embeddings.py` for embedding SDKs, `agent.py` for LangChain). | `test_layers.py` |
 | **F2** | MongoDB is the platform, not a pluggable backend: no storage abstraction over aggregation, `$graphLookup`, or `$vectorSearch`. The only swappable data behaviour is graph traversal, through the traverser registry (§ 4). | review |
 | **G1** | The agent is a LangGraph `StateGraph`. What can be computed is a deterministic node; the LLM chooses tools, judges open questions, and writes the answer. | review |
 
@@ -96,7 +96,7 @@ Layer of each module:
 
 | Layer | Modules |
 |---|---|
-| common | `config`, `db`, `errors` |
+| common | `config`, `db`, `errors`, `embeddings` |
 | engine | `ontology`, `detection`, `rules`, `engine`, `registry`, `catalog`, `ingest` |
 | tools | `tools/*` |
 | agent | `agent` |

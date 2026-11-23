@@ -23,10 +23,10 @@ The chunk id comes from ``catalog.chunk_id``, the same function the seed uses
 to check ``clauses.chunkId``. That shared id is what lets a triggered clause
 point at its exact source text.
 
-Embedding happens here, in application code, with Voyage AI
-(``input_type="document"``); queries use ``input_type="query"`` in
-``tools/documents.py``. ``scripts/ingest_docs.py`` writes the result to
-MongoDB and creates the Vector Search index.
+Embedding happens here, in application code, with the embedder from
+``embeddings.py`` (``kind="document"``); queries are embedded with
+``kind="query"`` in ``tools/documents.py``. ``scripts/ingest_docs.py``
+writes the result to MongoDB and creates the Vector Search index.
 """
 
 from __future__ import annotations
@@ -35,9 +35,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-import voyageai
-
 from coldchain_copilot.catalog import chunk_id, parse_frontmatter
+from coldchain_copilot.embeddings import Embed
 
 Doc = dict[str, Any]
 
@@ -98,8 +97,8 @@ def chunk_documents(docs_dir: Path) -> list[Doc]:
     return [chunk for path in sorted(docs_dir.glob("*.md")) for chunk in chunk_document(path)]
 
 
-def embed_chunks(chunks: list[Doc], *, api_key: str, model: str, client: Any = None) -> list[Doc]:
-    """Adds a Voyage embedding to each chunk, in one request.
+def embed_chunks(chunks: list[Doc], *, embed: Embed, model: str) -> list[Doc]:
+    """Adds an embedding to each chunk, in one request.
 
     The embedded text is the document source line plus the chunk text, so a
     query such as "BlueHarbor notification deadline" can match on the
@@ -107,21 +106,20 @@ def embed_chunks(chunks: list[Doc], *, api_key: str, model: str, client: Any = N
 
     Args:
         chunks: Output of :func:`chunk_documents`.
-        api_key: Voyage AI key (``VOYAGE_API_KEY``).
-        model: Voyage model (``VOYAGE_EMBED_MODEL``). The query side must use
-            the same model.
-        client: A Voyage client; tests pass a stand-in. Defaults to a real one.
+        embed: The embedder from ``embeddings.get_embedder``; tests pass a
+            stand-in.
+        model: The model ``embed`` uses (``EMBEDDING_MODEL``), stored on
+            each chunk so a search can tell when the query side uses a
+            different model.
 
     Returns:
         The same chunks, each with ``embedding`` (a list of floats) and
         ``embeddingModel``.
     """
-    client = client or voyageai.Client(api_key=api_key)
     texts = [f"{chunk['source']}\n{chunk['text']}" for chunk in chunks]
-    result = client.embed(texts, model=model, input_type="document")
     return [
         {**chunk, "embedding": vector, "embeddingModel": model}
-        for chunk, vector in zip(chunks, result.embeddings, strict=True)
+        for chunk, vector in zip(chunks, embed(texts, "document"), strict=True)
     ]
 
 
@@ -129,9 +127,9 @@ def vector_index_definition(dimensions: int) -> Doc:
     """Returns the Vector Search index definition for ``knowledge``.
 
     ``dimensions`` is read from the embeddings themselves, not configured, so
-    changing ``VOYAGE_EMBED_MODEL`` and rerunning ingestion is enough.
-    Voyage embeddings are normalized, so cosine and dot product rank the same;
-    cosine is used because it does not depend on that.
+    changing ``EMBEDDING_MODEL`` and rerunning ingestion is enough.
+    Cosine similarity is used because it does not depend on whether a
+    provider normalizes its vectors.
 
     Args:
         dimensions: Length of one embedding vector.

@@ -41,13 +41,13 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from coldchain_copilot import db
-from coldchain_copilot.config import get_settings
+from coldchain_copilot.config import Settings, get_settings
 from coldchain_copilot.tools import gateway
 
 RECURSION_LIMIT = 30
@@ -114,7 +114,7 @@ def build_graph(model: Any, checkpointer: Any = None):
 
     Args:
         model: A chat model with the gateway's tools already bound
-            (``ChatOpenAI(...).bind_tools(gateway.SCHEMAS)``). Tests pass a
+            (``chat_model(settings).bind_tools(gateway.SCHEMAS)``). Tests pass a
             stand-in with an ``invoke(messages)`` method.
         checkpointer: Where conversation state is saved; ``MongoDBSaver`` in
             :func:`create_agent`, an in-memory saver in tests.
@@ -157,19 +157,31 @@ def next_step(state: MessagesState) -> str:
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
+def chat_model(settings: Settings) -> Any:
+    """Builds the chat model named by ``LLM_MODEL`` (``provider:model``).
+
+    ``init_chat_model`` is LangChain's factory for every provider it
+    integrates, so changing the provider is a configuration change, not a
+    code change (rule F1). The provider's integration reads its own API key
+    from the environment (``OPENAI_API_KEY`` for ``openai:...``).
+
+    Options that only one provider understands are added for that provider:
+    newer OpenAI models take tool calls only through the Responses API, and
+    ``LLM_REASONING_EFFORT`` is OpenAI's ``reasoning.effort``.
+    """
+    options: dict[str, Any] = {}
+    if settings.llm_model.startswith("openai:"):
+        options["use_responses_api"] = True
+        if settings.llm_reasoning_effort:
+            options["reasoning"] = {"effort": settings.llm_reasoning_effort}
+    return init_chat_model(settings.llm_model, **options)
+
+
 def create_agent():
-    """Builds the agent with the configured OpenAI model and MongoDB checkpointer."""
+    """Builds the agent with the configured chat model and MongoDB checkpointer."""
     settings = get_settings()
-    # Newer OpenAI models take tool calls only through the Responses API.
-    reasoning = {"effort": settings.openai_reasoning_effort} if settings.openai_reasoning_effort else None
-    model = ChatOpenAI(
-        model=settings.openai_model,
-        api_key=settings.require_openai_key(),
-        use_responses_api=True,
-        reasoning=reasoning,
-    )
     checkpointer = MongoDBSaver(db.get_client(), db_name=settings.db_name)
-    return build_graph(model.bind_tools(gateway.SCHEMAS), checkpointer)
+    return build_graph(chat_model(settings).bind_tools(gateway.SCHEMAS), checkpointer)
 
 
 def ask(agent: Any, question: str, thread_id: str) -> dict:

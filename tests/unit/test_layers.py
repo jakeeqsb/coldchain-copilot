@@ -1,9 +1,12 @@
-"""Unit tests for the layer rules (design/decisions.md § 7, rules A1 and A2).
+"""Unit tests for the layer rules (design/decisions.md § 7, rules A1, A2, and F1).
 
 The package has four layers, and a module may import only from its own layer
 or the layers below it::
 
     common  →  engine  →  tools  →  agent
+
+Provider SDKs are imported only in their provider module (F1), so changing a
+model provider never touches the rest of the code.
 
 Imports are read from the source with ``ast``, so nothing is executed and no
 database is needed. A new module must be given a layer in ``LAYERS`` before
@@ -27,6 +30,7 @@ LAYERS = {
     "config": "common",
     "db": "common",
     "errors": "common",
+    "embeddings": "common",
     "catalog": "engine",
     "detection": "engine",
     "engine": "engine",
@@ -38,6 +42,15 @@ LAYERS = {
     "agent": "agent",
 }
 """Top-level module (or subpackage) → layer. ``tools.*`` modules are all in ``tools``."""
+
+PROVIDER_SDKS = {
+    "voyageai": {"embeddings"},
+    "openai": {"embeddings"},
+    "langchain": {"agent"},
+    "langchain_core": {"agent"},
+    "langchain_openai": {"agent"},
+}
+"""Provider SDK (top-level import name) → the only modules allowed to import it."""
 
 
 def module_name(path: Path) -> str:
@@ -92,6 +105,17 @@ def internal_imports(path: Path) -> set[str]:
     return found - {""}
 
 
+def external_imports(path: Path) -> set[str]:
+    """Returns the top-level names of non-package imports, e.g. ``{"pymongo", "voyageai"}``."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            found.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            found.add(node.module.split(".")[0])
+    return found - {PACKAGE}
+
+
 def test_the_parser_finds_both_import_styles() -> None:
     # engine.py uses relative imports, tools/gateway.py absolute ones.
     assert {"db", "detection", "ontology", "registry", "rules", "errors"} <= internal_imports(SRC / "engine.py")
@@ -115,3 +139,11 @@ def test_agent_reaches_data_only_through_the_gateway() -> None:
     """Rule A2: from the engine and tools layers, the agent imports only the gateway."""
     imports = internal_imports(SRC / "agent.py")
     assert {m for m in imports if layer(m) in ("engine", "tools")} == {"tools.gateway"}
+
+
+@pytest.mark.parametrize("path", package_modules(), ids=module_name)
+def test_provider_sdks_stay_in_their_module(path: Path) -> None:
+    """Rule F1: an SDK in ``PROVIDER_SDKS`` is imported only by its allowed modules."""
+    module = module_name(path)
+    misplaced = sorted(sdk for sdk in external_imports(path) & PROVIDER_SDKS.keys() if module not in PROVIDER_SDKS[sdk])
+    assert misplaced == [], f"{module} imports {misplaced}; use embeddings.get_embedder or agent.chat_model"
