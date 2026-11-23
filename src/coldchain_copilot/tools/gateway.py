@@ -36,7 +36,7 @@ from bson import ObjectId
 
 from coldchain_copilot import engine
 from coldchain_copilot.errors import ErrorCode, ToolError
-from coldchain_copilot.tools import adhoc, lookup, sensor
+from coldchain_copilot.tools import adhoc, documents, lookup, sensor
 
 Doc = dict[str, Any]
 
@@ -55,6 +55,8 @@ FUNCTIONS: dict[str, Callable[..., Doc]] = {
     "find_energy_anomalies": sensor.find_energy_anomalies,
     "get_fleet_overview": sensor.get_fleet_overview,
     "get_reefer_timeline": sensor.get_reefer_timeline,
+    "search_knowledge": documents.search_knowledge,
+    "get_clause": documents.get_clause,
     "evaluate_obligations": engine.evaluate_shipment,
     "run_aggregation": adhoc.run_aggregation,
 }
@@ -140,6 +142,27 @@ SCHEMAS: list[Doc] = [
          "bucket_minutes": {"type": "integer",
                             "description": "Bucket size. Default 5; widened automatically to at most 96 buckets."}},
         ["reefer_id"],
+    ),
+    _tool(
+        "search_knowledge",
+        "Semantic search over contract articles, SOP sections, and maintenance manual sections. "
+        "With shipment_id, only that shipment's contract version and the procedures for its cargo "
+        "are searched; without it, contracts are excluded. Cite each result by its source. Use it "
+        "for what a document says; use evaluate_obligations for whether a clause is triggered.",
+        {"query": {"type": "string", "description": "The question in natural language."},
+         "shipment_id": _SCOPE["shipment_id"] | {"description": "Shipment whose contract and cargo scope the search."},
+         "doc_type": {"type": "string", "enum": list(documents.DOC_TYPES),
+                      "description": "Only this kind of document. contract needs shipment_id."},
+         "k": {"type": "integer", "description": "Number of chunks. Default 4."}},
+        ["query"],
+    ),
+    _tool(
+        "get_clause",
+        "Exact text of one clause by clause_id (as named by evaluate_obligations) or one chunk by "
+        "chunk_id, plus the structured rule when there is one. Use it to quote the clause behind "
+        "an obligation instead of searching for it.",
+        {"clause_id": {"type": "string", "description": "e.g. blueharbor-live-fish-v1-art6"},
+         "chunk_id": {"type": "string", "description": "e.g. blueharbor-live-fish-v1-article-6"}},
     ),
     _tool(
         "evaluate_obligations",
