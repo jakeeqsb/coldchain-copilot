@@ -1,0 +1,388 @@
+# Refactoring Plan (Stage 6)
+
+A working plan, not a design record. It tracks the refactoring on the
+`refactoring` branch. When a step is done, its lasting decisions move to
+[`decisions.md`](./decisions.md) or the design document it affects, and its
+checkbox here is ticked. When the whole stage is done, this file is trimmed to
+a short summary or removed.
+
+## 1. Why
+
+The code works and the tests pass, but it grew step by step as features were
+needed. The same knowledge now lives in more than one place, and part of the
+ontology is description rather than definition:
+
+- `data/ontology.json` says `Shipment` lives in `shipments` with key
+  `shipmentId`, but `engine.py` never reads that; it hard-codes `shipmentId`,
+  `departedAt`, and `deliveredAt`. `tools/sensor.py` repeats the same period
+  logic in `shipment_period`.
+- "A compressor stop or a door opening can cause a temperature excursion" is
+  known only inside `detect_temperature_excursion`, which reruns both
+  detectors to find a cause. The ontology does not show this relation.
+- Link types use `Reefer` and `Contract` as endpoints, but neither is defined
+  as an object type, and `catalog.py` does not check link endpoints.
+- External services are wired in by hand. `ingest.py` and
+  `tools/documents.py` each import `voyageai` and build their own client;
+  `agent.py` builds a `ChatOpenAI` directly. Changing the embedding or chat
+  model means editing several modules.
+- `agent.py` mixes the prompt, the graph, run statistics, and the CLI, and
+  sends every question, briefings included, through the same LLM ⇄ tools
+  loop (4 LLM calls, ~28 s for a fleet briefing).
+
+The project is also the starting point for a later, generic **ontology
+builder and engine** on MongoDB. That builder is only possible if the
+ontology actually drives the engine. So this refactoring has two goals:
+
+1. Make the code structured and easy to follow (one place per fact, clear
+   layers, documented rules).
+2. Make the seam between a generic **kernel** and the cold-chain **domain
+   pack** visible, without extracting a framework yet.
+
+## 2. Guiding Principle
+
+> **When the code and the ontology both know the same fact, make the code
+> read it from the ontology.**
+
+An analogy: the ontology is the menu, the engine is the kitchen. Today the
+kitchen cooks from memory, so changing the menu changes nothing. After the
+refactoring the kitchen reads the menu. A builder is a tool for writing menus,
+so it needs a kitchen that follows them.
+
+Behaviour does not change. Every expected result in
+[`ontology.md` § 6](./ontology.md#6-expected-results-on-seeded-data) stays the
+same, and `tests/integration/test_scenarios.py` keeps checking it. Only *who
+knows each fact* changes.
+
+```text
+        before                                  after
+ ┌────────────────────┐               ┌────────────────────┐
+ │ ontology.json      │               │ ontology.json      │ ◀── what a builder edits
+ │ (half description) │               │ (all executed)     │
+ └────────────────────┘               └─────────┬──────────┘
+                                                │ read
+ ┌────────────────────┐               ┌─────────▼──────────┐
+ │ engine / tools     │               │ KERNEL             │ ◀── unchanged across domains
+ │ domain knowledge   │      ──▶      │ engine · rules ·   │
+ │ spread around      │               │ catalog · registry │
+ └────────────────────┘               └─────────┬──────────┘
+                                                │ called by name
+                                      ┌─────────▼──────────┐
+                                      │ DOMAIN functions   │ ◀── new domain = write these
+                                      │ detect_*, handlers │
+                                      └────────────────────┘
+```
+
+**Done when** the answer to "what must change to run a different domain?" is
+"JSON files, a few detectors, and documents", with no engine code in the list.
+
+## 3. Engineering Rules (draft)
+
+Confirmed in step 0 and recorded in `decisions.md`.
+
+| Rule | Statement |
+|---|---|
+| A1 | Layers are `common → engine → tools → agent`; imports go downward only. Enforced by `tests/unit/test_layers.py`. |
+| A2 | One entrance per layer: the engine resolves names through `registry.py`; the LLM reaches data only through `tools/gateway.py`. |
+| B1 | Judgment logic (detection, thresholds, condition checks) lives only in the engine layer. Tools resolve scope, call, and shape results. |
+| B2 | The ontology holds names only; every name resolves in `registry.py` (checked by `catalog.py`, tested). |
+| B3 | A fact the ontology states is read from the ontology, not repeated in code (the guiding principle). |
+| C1 | A new file only for a new responsibility with its own name in the vocabulary (a layer, an ontology concept, an external dependency). Never split a file by size alone. |
+| C2 | One name, one meaning. |
+| D1 | Validate at boundaries only: `catalog.py` at seed time, tools at LLM input. |
+| D2 | `ToolError` becomes an error dict only in `tools/gateway.py`. |
+| D3 | UTC everywhere; KST display strings only in `tools/gateway.py`. |
+| E1 | Pure logic gets unit tests (no database); functions that touch the database get integration tests. |
+| F1 | External model providers are chosen by configuration, never by code. Provider SDKs (`voyageai`, `openai`, `langchain_*`) are imported only in their provider module (`embeddings.py`, `agent.py`). Enforced by `tests/unit/test_layers.py`. |
+| F2 | MongoDB is the platform, not a pluggable backend: no storage abstraction over aggregation, `$graphLookup`, or `$vectorSearch`. The only swappable data behaviour is graph traversal, through the traverser registry. |
+| G1 | The agent is a LangGraph `StateGraph`. What can be computed is a deterministic node; the LLM only chooses tools, judges open questions, and writes the answer. |
+
+Layer placement: `config`, `db`, `errors`, `embeddings` are common. `ontology`,
+`detection`, `rules`, `engine`, `registry`, `catalog`, and `ingest` are
+engine layer (`ingest` defines the `knowledge` chunk shape and index used by
+`tools/documents.py`, so it is not scripts-only).
+
+## 4. Steps
+
+Each step is one reviewable change with its tests, and ends with a table of
+`file | path | what changed`.
+
+### Step 0. Clean-up and rules (stage 5 leftovers)
+
+- [ ] `SYSTEM_PROMPT` in `agent.py`: the agent is read-only (never offers to
+      send, notify, or change); "fact vs. condition" uses the clause `basis`
+      (actual vs. required); cite documents, never tool names.
+- [ ] README: Quick Start uses `scripts/seed.py`, `scripts/ingest_docs.py`,
+      `coldchain-copilot -q`; requirements say only "MongoDB with Vector
+      Search, reachable at `MONGODB_URI`" (how to run it is up to the user);
+      Project Structure lists `agent.py`, `ingest.py`, and the 9 tools; remove
+      the link to the missing `scaling.md`. The variable table is finished in
+      step 1, when the names change.
+- [ ] README.ko.md: not restored now; rewrite after stage 6.
+- [ ] `decisions.md` § 7: engineering rules (§ 3 above).
+- [ ] `tests/unit/test_layers.py`: parse imports with `ast`, fail on an
+      upward import (A1). The provider-SDK check (F1) is added in step 1.
+- [ ] Demo questions, once `.env` exists (compare with expected results):
+  - RF-03이 지금 싣고 있는 화물과 허용 온도 범위는?
+  - FLEET-01에서 온도 이탈이 있었던 컨테이너와 원인은?
+  - SHP-102 계약에서 온도 이탈이 나면 누구에게 언제까지 통보해야 해?
+  - FLEET-01 현황 브리핑해줘
+  - SHP-102는 Article 8이 왜 안 걸렸고, Article 6 다음엔 뭘 해야 해?
+
+### Step 1. Model providers chosen by configuration
+
+```text
+ .env                                 common layer                       callers
+ EMBEDDING_PROVIDER=voyage            embeddings.py                      ingest.py
+ EMBEDDING_MODEL=voyage-4      ──▶     EMBEDDERS = {               ──▶   tools/documents.py
+                                         "voyage": voyage_embedder,      (no SDK import;
+                                         "openai": openai_embedder,       call embed(texts, kind))
+                                       }
+                                       get_embedder(settings) -> embed
+
+ LLM_MODEL=openai:gpt-6.1-terra ──▶   init_chat_model(...)         ──▶   agent.build_graph(model, ...)
+ LLM_REASONING_EFFORT=low              (LangChain's standard factory)
+```
+
+- [ ] `embeddings.py` (new file; rule C1: a new external dependency): an
+      `Embed` signature `(texts, kind) -> vectors` with `kind` in
+      `document` / `query`, one small factory per provider, and an
+      `EMBEDDERS` registry selected by `EMBEDDING_PROVIDER`. Functions, no
+      class hierarchy.
+- [ ] `ingest.embed_chunks` and `tools/documents.embed_query` take an
+      `Embed` instead of building a Voyage client; tests pass a fake one.
+- [ ] Chat model from `init_chat_model(settings.llm_model, ...)`; no
+      `ChatOpenAI` import. Add `langchain` as a direct dependency (it is
+      transitive today). Embeddings keep their own registry so the engine
+      layer (`ingest`) does not depend on LangChain, and Voyage's
+      `input_type` stays explicit.
+- [ ] Rename variables (breaking, done now while no `.env` exists):
+
+      | Old | New |
+      |---|---|
+      | `VOYAGE_EMBED_MODEL` | `EMBEDDING_MODEL` (+ `EMBEDDING_PROVIDER`, default `voyage`) |
+      | `OPENAI_MODEL` | `LLM_MODEL` as `provider:model`, default `openai:gpt-6.1-terra` |
+      | `OPENAI_REASONING_EFFORT` | `LLM_REASONING_EFFORT` |
+
+      API keys keep their provider names (`VOYAGE_API_KEY`,
+      `OPENAI_API_KEY`), because the SDKs read them under those names.
+      Update `config.py`, `.env.example`, and the README variable table.
+- [ ] Model mismatch guard: each chunk already stores `embeddingModel`.
+      `search_knowledge` returns `EVIDENCE_UNAVAILABLE` ("re-run
+      ingest_docs.py") when it differs from the configured model, instead of
+      comparing vectors from two models.
+- [ ] `test_layers.py`: provider SDKs imported only where F1 allows.
+
+### Step 2. Load objects through the ontology
+
+Fixes the duplicated shipment period.
+
+```text
+ ontology.json                         engine.py
+ ┌──────────────────────────────┐      ┌───────────────────────────────────┐
+ │ Shipment                     │ ───▶ │ load_object("Shipment", id, now)  │
+ │  collection: "shipments"     │ read │  → (document, start, end)         │
+ │  key: "shipmentId"           │      └──────────┬────────────────────────┘
+ │  period: {start:"departedAt",│                 │ the only caller path
+ │           end:"deliveredAt"} │       ┌─────────┴─────────┐
+ └──────────────────────────────┘    engine step 1     tools/sensor.resolve
+```
+
+- [ ] Add `period` to the `Shipment` object type.
+- [ ] `engine.load_object(object_type, object_id, now)` reads `collection`,
+      `key`, and `period` from the ontology.
+- [ ] `evaluate_shipment` step 1 and `tools/sensor.resolve` use it; remove
+      `sensor.shipment_period`.
+- [ ] Design check: the same function must fit a `Lot` object in another
+      domain (§ 6). Not implemented here.
+
+### Step 3. Causes as ontology data
+
+Fixes the duplicated aggregations and makes the causal relation visible.
+
+```text
+ now                                           after
+ engine                                        ontology.json
+  ├─ detect_temperature_excursion                event:temperature_excursion
+  │    ├─ detect_compressor_stop   (1st)           causes: [event:compressor_stop,
+  │    └─ detect_door_opening      (1st)                    event:door_opening]
+  ├─ detect_compressor_stop        (2nd)       engine
+  └─ ...                                         1. collect event types (clauses + causes)
+                                                 2. run each detector once
+                                                 3. attach_causes by time overlap
+```
+
+- [ ] Add `causes` (ordered = priority) to `event:temperature_excursion`.
+- [ ] One engine-layer function runs the needed detectors once per
+      evaluation and attaches causes; `engine` and `find_excursions` both use
+      it. `detect_temperature_excursion` no longer calls other detectors.
+- [ ] `catalog.py` checks that every `causes` entry is an event type.
+
+The cost saved is small (tools take ~0.1 s in total). The point is that the
+relation becomes data a builder can show and edit.
+
+### Step 4. Stronger catalog checks
+
+- [ ] Define `Reefer` and `Contract` object types.
+- [ ] `catalog.py` checks that every link type's `from` and `to` is an object
+      type or a class root.
+- [ ] Note in `ontology.md`: `catalog.py` is the ontology's grammar checker;
+      a builder reuses it to validate LLM-drafted rules.
+
+### Step 5. Agent on LangGraph practice, and briefing latency
+
+Measured: fleet briefing 28–30 s, 4 LLM calls, ~36k input tokens, tools
+0.1 s in total; `get_clause` is called ~11 times to quote clause text.
+Single-shipment questions take ~11 s and 12k tokens. Reasoning effort low
+vs. medium barely changed this: the cost is sequential round trips and
+accumulated tool output.
+
+The agent stays a `StateGraph` (not LangChain's prebuilt `create_agent`):
+the builder direction needs deterministic nodes mixed with LLM nodes, which
+a single prebuilt loop does not give.
+
+```text
+ now (every question takes the same loop)
+   question → llm ⇄ tools ⇄ llm ⇄ tools ⇄ llm → answer        4 LLM calls, ~28 s
+
+ after (briefings take a deterministic path)
+   question ─▶ route ─┬─ other question ─▶ llm ⇄ tools → answer   (as today)
+                      └─ briefing ───────▶ collect ─▶ llm → answer
+                                           (deterministic node:
+                                            find_excursions,
+                                            evaluate_obligations × N,
+                                            clause text via $lookup)
+```
+
+- [ ] (B) `evaluate_obligations` joins `knowledge` by `chunkId` with
+      `$lookup` and returns each clause's heading and text, so `get_clause`
+      is no longer needed to quote it.
+- [ ] (C) Drop fields the LLM does not use from the engine output.
+- [ ] Briefing path: a `route` node (start simple: a CLI flag or a keyword
+      rule; an LLM classifier only if needed) and a deterministic `collect`
+      node that calls the gateway functions directly, then one `llm` call to
+      write the briefing (rule G1).
+- [ ] Runtime context: pass `now` and the display time zone through
+      `context_schema` instead of calling `datetime.now()` inside the node,
+      so graph tests are deterministic.
+- [ ] Context size: trim large tool results from earlier turns of a thread
+      (`trim_messages` or a short summary) before each model call.
+- [ ] Split by entry point (rule C1): `agent.py` keeps the prompt, state,
+      and graph; `cli.py` takes `main`, `show`, and the stats helpers. Rename
+      our `create_agent` (it clashes with `langchain.agents.create_agent`,
+      rule C2), for example to `build_agent`.
+- [ ] (D) Token streaming with `stream_mode="messages"` in the CLI; LangSmith
+      tracing switched on by environment variables only.
+- [ ] Measure before and after with `turn_stats`; record the numbers here.
+
+Requires `.env` (OpenAI and Voyage keys) to measure.
+
+### Step 6. Documents
+
+- [ ] Chunking strategy in `ontology.md` or `entities.md`: structure-based,
+      one chunk per Article/Section. Why: clause = judgment unit = citation
+      unit; `chunkId` joins `clauses` and `knowledge`; the documents are
+      short; cross-references are followed with `$graphLookup`, not chunk
+      overlap. Limits: long clauses → parent-child chunks; nested numbering;
+      documents without headings → fixed-size fallback.
+- [ ] `interfaces.md`: remove "(stage 4)" markers; 9 tools.
+- [ ] Kernel/domain map (§ 5) moved into `decisions.md` or `ontology.md`.
+- [ ] Replace key ASCII diagrams in `ontology.md` and `interfaces.md` with
+      Mermaid where it reads better.
+
+### Out of scope
+
+- A `graph_engine` abstraction for `dependent_clauses` (one implementation
+  only; revisit when a graph database is added).
+- Splitting the package into kernel and domain packages (wait for a second
+  domain).
+- Repository rename to `coldchain-copilot` (done on GitHub, not in code).
+- A storage abstraction over MongoDB (rule F2).
+- LangChain's prebuilt `create_agent` (rule G1: the agent stays a
+  `StateGraph`).
+
+## 5. Kernel / Domain Map (today)
+
+| Module | Kernel (generic) | Domain (cold chain) |
+|---|---|---|
+| `rules.py` | all | — |
+| `registry.py` | structure | the registered functions |
+| `engine.py` | the six steps | `Shipment` hard-coding (removed in step 2) |
+| `ontology.py` | `dependent_clauses`, `ontology_docs` | `applicable_clauses` (contract and cargo rules) |
+| `detection.py` | `run_pipeline`, `trend_pipeline`, `attach_causes` | the five `detect_*` functions |
+| `catalog.py` | name-resolution checks | `chunkId` format, `cargo_specs` |
+| `ingest.py` | structure-based chunking, embedding, index | the `Article|Section` heading pattern |
+| `tools/` | `gateway` skeleton, `documents`, `adhoc` | `sensor`, `lookup` |
+| `embeddings.py` (step 1) | all | — |
+| `agent.py` | graph shape (route, collect, llm ⇄ tools) | the system prompt and briefing format |
+
+## 6. Direction: the Ontology Builder
+
+Not built in this stage. Recorded so each step can be checked against it.
+
+```text
+ Phase 0  This refactoring. Cold chain is the reference implementation;
+          the ontology drives more of the engine; kernel/domain map written.
+ Phase 1  Kernel + a second domain. The meta-model (objectType, linkType,
+          eventType, actionType, rule) defined as MongoDB documents with
+          $jsonSchema; catalog becomes a generic validator. A second domain
+          runs with no kernel code change.
+ Phase 2  Builder (authoring).
+          ① infer objectType drafts from existing collections ($sample)
+          ② documents → LLM drafts rules in the ontology's vocabulary →
+             catalog check → human approval (review.status)
+          ③ generate $jsonSchema validators and indexes from object types
+ Phase 3  Runtime. LLM tools generated from the ontology (objectType → get_X,
+          eventType → find_X); Change Streams for reactive evaluation
+          (not on Time Series); optional stored incidents; deep traversal
+          projected to a graph database behind the traverser registry.
+```
+
+**Scope: an operational ontology** (objects, links, events, actions, rules),
+not an OWL/RDF semantic-web editor. Reasoners and triple stores own that
+space; MongoDB's strength is keeping data, meaning, and execution together.
+
+**MongoDB's role:** object instances are documents; the meta-model sits next
+to the data; detectors are aggregations; Vector Search and Time Series live in
+the same cluster; schema inference and `$jsonSchema` connect definitions and
+validation. A graph database is added only for deep traversal and graph
+algorithms.
+
+### Design check: pharmaceutical cold chain
+
+A near domain (same reefers and sensors, different rules) used as an
+imaginary second customer while designing steps 2–4. Illustrative values
+only.
+
+| Part | Reused | New in the domain pack |
+|---|---|---|
+| Classes | — | `product:vaccine` → `product:mrna_vaccine`, `product:antiviral` |
+| Objects, links | `Shipment`, `Reefer` | `Lot` (inShipment, ofProduct), `Product`, `QualityAgreement` |
+| Detectors | excursion, door, compressor (`run_pipeline`) | MKT (mean kinetic temperature), lot excursion budget |
+| Actions | `notify`, `inspect`, `report` | `quarantine` |
+| Documents | ingest, search | quality agreements, GDP guidance, stability data |
+
+Where today's kernel would stop, and what the builder needs:
+
+| # | Gap | Today | Needed |
+|---|---|---|---|
+| 1 | The judged object is a `Lot` | only `evaluate_shipment` | `evaluate(object_type, id)` (extends step 2) |
+| 2 | Totals across shipments | one shipment period | Lot → Shipments → Readings (2 hops, `$lookup`) |
+| 3 | Quarantine changes state | handlers only write a briefing item | state change after human approval; the agent stays read-only |
+| 4 | Audit trail is mandatory | evaluations are not stored (`decisions.md` § 2) | stored evaluation records with data window, rule and ontology version, approver; a per-domain option |
+
+Gap 4 reverses a cold-chain decision, which a single domain could never show.
+The pharmaceutical domain is a weak test of generality (it is still a cold
+chain), so a clearly different domain (for example insurance claims or
+equipment maintenance) should follow it in phase 1.
+
+## 7. Progress
+
+| Step | Status | Notes |
+|---|---|---|
+| 0 | not started | clean-up and rules; demo questions wait for `.env` |
+| 1 | not started | model providers |
+| 2 | not started | objects through the ontology |
+| 3 | not started | causes as data |
+| 4 | not started | catalog checks |
+| 5 | not started | agent and latency; needs `.env` |
+| 6 | not started | documents |
