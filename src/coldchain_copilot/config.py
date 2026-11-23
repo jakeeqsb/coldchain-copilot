@@ -36,6 +36,9 @@ class Settings:
         voyage_embed_model: Voyage model used for documents and queries.
         openai_api_key: OpenAI key for the briefing LLM, if set.
         openai_model: OpenAI chat model with tool calling.
+        openai_reasoning_effort: Reasoning effort sent with each model call
+            (e.g. ``none``, ``low``, ``medium``), or None for the model's own
+            default. Lower is faster; check the briefing still holds up.
         max_window_hours: Upper bound for fleet- or reefer-scoped sensor
             queries. Shipment-scoped queries use the shipment period instead.
         data_dir: Directory of the catalog JSON files. Relative paths
@@ -50,6 +53,7 @@ class Settings:
     voyage_embed_model: str = "voyage-4"
     openai_api_key: str | None = None
     openai_model: str = "gpt-5-mini"
+    openai_reasoning_effort: str | None = None
     max_window_hours: int = 72
     data_dir: Path = Path("data")
     docs_dir: Path = Path("docs")
@@ -133,6 +137,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         voyage_embed_model=get("VOYAGE_EMBED_MODEL") or defaults.voyage_embed_model,
         openai_api_key=get("OPENAI_API_KEY"),
         openai_model=get("OPENAI_MODEL") or defaults.openai_model,
+        openai_reasoning_effort=get("OPENAI_REASONING_EFFORT"),
         max_window_hours=_positive_int(
             "MAX_WINDOW_HOURS", env.get("MAX_WINDOW_HOURS"), defaults.max_window_hours
         ),

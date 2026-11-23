@@ -15,7 +15,7 @@ dependencies = [
 ]
  
 [project.scripts]
-coldchain-copilot = "coldchain_copilot:main"
+coldchain-copilot = "coldchain_copilot.agent:main"
  
 [dependency-groups]
 dev = [
@@ -31,4 +31,3 @@ testpaths = ["tests"]
 markers = [
     "integration: needs a running MongoDB with seed data (skipped when MONGODB_URI is unreachable)",
 ]
- 
