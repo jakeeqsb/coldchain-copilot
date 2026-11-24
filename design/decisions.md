@@ -99,7 +99,7 @@ Layer of each module:
 | common | `config`, `db`, `errors`, `embeddings` |
 | engine | `ontology`, `detection`, `rules`, `engine`, `registry`, `catalog`, `ingest` |
 | tools | `tools/*` |
-| agent | `agent` |
+| agent | `agent`, `cli` |
 
 `ingest` is in the engine layer, not scripts-only: it defines the `knowledge` chunk shape and the vector index that `tools/documents.py` queries. A new module is added to the `LAYERS` table in `test_layers.py`, so its layer is always a deliberate choice.
 

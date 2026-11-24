@@ -18,23 +18,15 @@ Conversation state is saved by ``MongoDBSaver`` in the same database
 (``checkpoints``, ``checkpoint_writes``), keyed by ``thread_id``, so a
 follow-up question in the same thread sees the earlier tool results.
 
-Run it:
-
-    uv run coldchain-copilot                       # interactive, new thread
-    uv run coldchain-copilot --thread demo-1       # continue a thread
-    uv run coldchain-copilot -q "Brief me on FLEET-01"
-
-Each answer is followed by one stats line for that question: elapsed time
-split into model time and tool time, LLM calls, tokens, and the tools called
-(with how many came back as errors).
+Build it with :func:`build_agent` and send questions with :func:`ask`,
+which also measures what each question used (:func:`turn_stats`). The
+terminal front end is ``coldchain_copilot.cli``.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
-import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -118,7 +110,7 @@ def build_graph(model: Any, checkpointer: Any = None):
             (``chat_model(settings).bind_tools(gateway.SCHEMAS)``). Tests pass a
             stand-in with an ``invoke(messages)`` method.
         checkpointer: Where conversation state is saved; ``MongoDBSaver`` in
-            :func:`create_agent`, an in-memory saver in tests.
+            :func:`build_agent`, an in-memory saver in tests.
 
     Returns:
         The compiled graph. Invoke it with ``{"messages": [...]}`` and a
@@ -178,7 +170,7 @@ def chat_model(settings: Settings) -> Any:
     return init_chat_model(settings.llm_model, **options)
 
 
-def create_agent():
+def build_agent():
     """Builds the agent with the configured chat model and MongoDB checkpointer."""
     settings = get_settings()
     checkpointer = MongoDBSaver(db.get_client(), db_name=settings.db_name)
@@ -239,50 +231,3 @@ def turn_stats(messages: list, elapsed: float) -> dict:
         "tools": dict(Counter(call["name"] for m in replies for call in m.tool_calls)),
         "tool_errors": sum(1 for m in results if '"error"' in m.content[:20]),
     }
-
-
-def format_stats(stats: dict) -> str:
-    """One line for the terminal.
-
-    For example ``12.4s (LLM 10.9s, tools 1.3s) · LLM 3 · tokens 8,213 in / 1,045 out · tools 6 ...``.
-    The time split appears only when :func:`ask` measured it.
-    """
-    tools = ", ".join(f"{name}×{count}" for name, count in sorted(stats["tools"].items())) or "none"
-    split = f" (LLM {stats['llm_seconds']}s, tools {stats['tool_seconds']}s)" if "llm_seconds" in stats else ""
-    return (
-        f"{stats['seconds']}s{split} · LLM {stats['llm_calls']} · "
-        f"tokens {stats['input_tokens']:,} in / {stats['output_tokens']:,} out · "
-        f"tools {sum(stats['tools'].values())} ({tools}) · errors {stats['tool_errors']}"
-    )
-
-
-# ----------------------------------------------------------------------- cli
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Command-line chat. Entry point of ``uv run coldchain-copilot``."""
-    parser = argparse.ArgumentParser(description="Cold-chain briefing copilot")
-    parser.add_argument("--thread", default=None, help="thread id to continue (default: a new one)")
-    parser.add_argument("-q", "--question", default=None, help="ask one question and exit")
-    args = parser.parse_args(argv)
-
-    agent = create_agent()
-    thread_id = args.thread or f"cli-{uuid.uuid4().hex[:8]}"
-
-    if args.question:
-        show(ask(agent, args.question, thread_id))
-        return
-
-    print(f"thread {thread_id}  (empty line to quit)")
-    while question := input("\n> ").strip():
-        show(ask(agent, question, thread_id))
-
-
-def show(result: dict) -> None:
-    """Prints an answer followed by its stats line."""
-    print("\n" + result["answer"])
-    print("\n── " + format_stats(result["stats"]))
-
-
-if __name__ == "__main__":
-    main()

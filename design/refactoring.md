@@ -318,10 +318,16 @@ document names (`[BlueHarbor 계약 제6조]`).
       so graph tests are deterministic.
 - [ ] Context size: trim large tool results from earlier turns of a thread
       (`trim_messages` or a short summary) before each model call.
-- [ ] Split by entry point (rule C1): `agent.py` keeps the prompt, state,
+- [x] Split by entry point (rule C1): `agent.py` keeps the prompt, state,
       and graph; `cli.py` takes `main`, `show`, and the stats helpers. Rename
       our `create_agent` (it clashes with `langchain.agents.create_agent`,
       rule C2), for example to `build_agent`.
+
+Result 5.2. `agent.py` keeps `ask` and `turn_stats` too: running and
+measuring a question is the agent's job, and keeping them there means
+`agent.py` never imports `cli.py`. `cli.py` has `main`, `show`, and
+`format_stats` (display only). The `coldchain-copilot` command now points to
+`cli:main`. No behaviour changed.
 - [ ] (D) Token streaming with `stream_mode="messages"` in the CLI; LangSmith
       tracing switched on by environment variables only.
 - [ ] Measure before and after with `turn_stats`; record the numbers here.

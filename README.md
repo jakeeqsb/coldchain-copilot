@@ -258,7 +258,7 @@ The code is in four layers, and imports go downward only (`tests/unit/test_layer
 ```text
  common      →  engine     →  tools      →  agent
  config         ontology      gateway       agent.py
- db             detection     lookup
+ db             detection     lookup        cli.py
  errors         rules         sensor
  embeddings     engine        documents
                 registry      adhoc
@@ -290,7 +290,8 @@ coldchain-copilot/
 │   │   ├── sensor.py      find_excursions, find_energy_anomalies, get_fleet_overview, get_reefer_timeline
 │   │   ├── documents.py   search_knowledge ($vectorSearch), get_clause
 │   │   └── adhoc.py       run_aggregation (guarded)
-│   └── agent.py           LangGraph agent (llm ⇄ tools, MongoDBSaver checkpoints) and CLI
+│   ├── agent.py           LangGraph agent (llm ⇄ tools, MongoDBSaver checkpoints)
+│   └── cli.py             Terminal chat: uv run coldchain-copilot
 └── tests/                 unit/ (no database) · integration/ (MongoDB with seed data)
 ```
 

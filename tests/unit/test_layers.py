@@ -40,6 +40,7 @@ LAYERS = {
     "rules": "engine",
     "tools": "tools",
     "agent": "agent",
+    "cli": "agent",
 }
 """Top-level module (or subpackage) → layer. ``tools.*`` modules are all in ``tools``."""
 
