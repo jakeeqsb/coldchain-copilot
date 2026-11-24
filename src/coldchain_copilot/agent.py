@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
@@ -49,6 +49,13 @@ RECURSION_LIMIT = 30
 
 TOOL_WORKERS = 8
 """Tool calls requested in one model turn run concurrently, up to this many."""
+
+KEEP_TOOL_RESULTS_FOR = 3
+"""The model sees tool results from this many most recent questions in full."""
+
+OMITTED = json.dumps({"omitted": "Result from an earlier question, left out to save space. "
+                                 "Call the tool again if you need it."})
+"""What the model sees instead of an older tool result."""
 
 SYSTEM_PROMPT = """\
 You are the cold-chain operations copilot for a reefer fleet carrying seafood.
@@ -141,7 +148,7 @@ def build_graph(model: Any, checkpointer: Any = None):
         now = runtime.context.now if runtime.context else datetime.now(timezone.utc)
         shown = now.astimezone(gateway.DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
         prompt = SystemMessage(SYSTEM_PROMPT.format(now=shown))
-        return {"messages": [model.invoke([prompt, *state["messages"]])]}
+        return {"messages": [model.invoke([prompt, *recent_tool_results(state["messages"])])]}
 
     def tools(state: MessagesState) -> dict:
         # Calls from one model turn are independent, so they run concurrently;
@@ -169,6 +176,33 @@ def next_step(state: MessagesState) -> str:
     """Routes to ``tools`` when the model asked for any, otherwise ends."""
     last = state["messages"][-1]
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
+
+
+def recent_tool_results(messages: list[BaseMessage], keep: int = KEEP_TOOL_RESULTS_FOR) -> list[BaseMessage]:
+    """Returns the conversation with tool results before the last ``keep`` questions omitted.
+
+    The model reads the whole thread on every call, so without this a long
+    thread grows by every result it ever fetched (a fleet briefing is ~15k
+    tokens) until it no longer fits. Recent results stay, so follow-up
+    questions still answer from them without calling a tool again.
+
+    An omitted result keeps its message, with :data:`OMITTED` as content: the
+    model's tool call and its result must stay paired, or the provider
+    rejects the conversation. Questions and answers are kept in full. Only
+    what is sent to the model changes; the saved thread keeps everything.
+
+    Args:
+        messages: The thread, oldest first.
+        keep: How many of the most recent questions keep their results.
+    """
+    questions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    if len(questions) <= keep:
+        return messages
+    cutoff = questions[-keep]
+    return [
+        m.model_copy(update={"content": OMITTED}) if i < cutoff and isinstance(m, ToolMessage) else m
+        for i, m in enumerate(messages)
+    ]
 
 
 def chat_model(settings: Settings) -> Any:

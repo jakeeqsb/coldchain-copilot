@@ -347,8 +347,25 @@ takes `now` (default: the clock) and the `llm` node reads
 `runtime.context.now`. Only `now` is passed: the display zone stays
 `gateway.DISPLAY_TZ`, the one zone every tool's display strings use (rule
 D3), so the prompt and the tools cannot disagree.
-- [ ] Context size: trim large tool results from earlier turns of a thread
+- [x] Context size: trim large tool results from earlier turns of a thread
       (`trim_messages` or a short summary) before each model call.
+
+Result 5.5. `agent.recent_tool_results` sends the model tool results from
+the last three questions only; older ones become a short "omitted, call
+again if needed" note. Not `trim_messages`: it drops whole messages by
+token count, which can split a tool call from its result, and the provider
+rejects that. Questions, answers, and the saved thread are kept in full.
+One thread of four questions, without and with the limit:
+
+| Question | Input tokens, no limit → limit 3 | Time (s) |
+|---|---|---|
+| 1. FLEET-01 briefing | 15.4k → 15.4k | 22.7 → 25.4 |
+| 2. RF-02 compressor, how long? | 14.5k → 14.5k (no tool call) | 2.9 → 3.2 |
+| 3. SHP-104 power change? | 14.6k → 14.6k (no tool call) | 2.9 → 2.8 |
+| 4. FLEET-01 briefing again | 40.6k → 18.0k | 20.0 → 20.2 |
+
+Follow-ups still answer from recent results without a tool call; a long
+thread no longer grows by every result it ever fetched.
 - [x] Split by entry point (rule C1): `agent.py` keeps the prompt, state,
       and graph; `cli.py` takes `main`, `show`, and the stats helpers. Rename
       our `create_agent` (it clashes with `langchain.agents.create_agent`,
@@ -369,7 +386,8 @@ appeared after 4–16 s instead of the whole 24–30 s. LangSmith needs no code:
 `.env` is loaded into the environment, and LangChain reads
 `LANGSMITH_TRACING` and `LANGSMITH_API_KEY` from there (see `.env.example`).
 Done before 5.5 at the user's request.
-- [ ] Measure before and after with `turn_stats`; record the numbers here.
+- [x] Measure before and after with `turn_stats`; record the numbers here.
+      (Recorded under each result above.)
 
 Requires `.env` (OpenAI and Voyage keys) to measure.
 
@@ -381,7 +399,7 @@ Requires `.env` (OpenAI and Voyage keys) to measure.
       short; cross-references are followed with `$graphLookup`, not chunk
       overlap. Limits: long clauses → parent-child chunks; nested numbering;
       documents without headings → fixed-size fallback.
-- [ ] `interfaces.md`: remove "(stage 4)" markers; 9 tools.
+- [ ] `interfaces.md`: remove "(stage 4)" markers; 10 tools.
 - [ ] Kernel/domain map (§ 5) moved into `decisions.md` or `ontology.md`.
 - [ ] Replace key ASCII diagrams in `ontology.md` and `interfaces.md` with
       Mermaid where it reads better.
@@ -481,5 +499,5 @@ equipment maintenance) should follow it in phase 1.
 | 2 | done | objects through the ontology |
 | 3 | done | causes as data |
 | 4 | done | catalog checks |
-| 5 | not started | agent and latency; needs `.env` |
+| 5 | done | agent and latency (5.1–5.6) |
 | 6 | not started | documents |

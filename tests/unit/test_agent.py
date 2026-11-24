@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from coldchain_copilot import agent
@@ -193,3 +193,28 @@ def test_on_token_gets_the_answer_text_but_not_tool_results(monkeypatch) -> None
 
     assert "".join(tokens) == result["answer"] == "Briefing."
     assert result["stats"]["first_text_seconds"] >= 0
+
+
+def test_tool_results_of_older_questions_are_omitted_for_the_model(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"result": args["q"]})
+    replies = []
+    for q in range(4):
+        replies += [AIMessage("", tool_calls=[tool_call("get_shipment", {"q": q}, f"c{q}")]), AIMessage(f"Answer {q}.")]
+    model = ScriptedModel(*replies)
+    graph = agent.build_graph(model, InMemorySaver())
+
+    for q in range(4):
+        agent.ask(graph, f"question {q}", "t10")
+
+    sent = [m for m in model.seen[-1] if isinstance(m, ToolMessage)]  # the last call, for question 3
+    assert [m.content for m in sent] == [agent.OMITTED, '{"result": 1}', '{"result": 2}', '{"result": 3}']
+    assert [m.tool_call_id for m in sent] == ["c0", "c1", "c2", "c3"]  # still paired with their calls
+    assert "Answer 0." in [m.content for m in model.seen[-1]]  # answers are kept
+    saved = [m for m in graph.get_state(config("t10")).values["messages"] if isinstance(m, ToolMessage)]
+    assert saved[0].content == '{"result": 0}'  # the saved thread is unchanged
+
+
+def test_short_threads_are_sent_unchanged() -> None:
+    messages = [HumanMessage("q"), AIMessage("", tool_calls=[tool_call("x", {}, "c")]),
+                ToolMessage("{}", tool_call_id="c")]
+    assert agent.recent_tool_results(messages) is messages
