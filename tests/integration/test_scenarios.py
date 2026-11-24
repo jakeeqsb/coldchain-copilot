@@ -7,12 +7,13 @@ deadline, the referenced follow-up clause, and the briefing items.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from coldchain_copilot import engine
 from coldchain_copilot.errors import ToolError
+from coldchain_copilot.tools import sensor
 
 pytestmark = pytest.mark.integration
 
@@ -89,3 +90,25 @@ def test_unknown_shipment(mongo_db) -> None:
     with pytest.raises(ToolError) as exc_info:
         engine.evaluate_shipment("SHP-999")
     assert exc_info.value.code == "NOT_FOUND"
+
+
+def test_load_object_reads_the_shipment_through_its_object_type(mongo_db) -> None:
+    now = datetime.now(timezone.utc)
+    shipment, start, end = engine.load_object("Shipment", "SHP-102", now)
+
+    assert shipment["shipmentId"] == "SHP-102" and "_id" not in shipment
+    assert (start, end) == (shipment["departedAt"], now)  # in transit: the period ends now
+
+
+def test_engine_and_sensor_tools_use_the_same_period(mongo_db) -> None:
+    now = datetime.now(timezone.utc)
+    period = engine.evaluate_shipment("SHP-102", now=now)["period"]
+    _, start, end = sensor.resolve(shipment_id="SHP-102", now=now)
+
+    assert (start, end) == (period["start"], period["end"])
+
+
+def test_unknown_object_names_its_type_and_key(mongo_db) -> None:
+    with pytest.raises(ToolError) as exc_info:
+        engine.load_object("Shipment", "SHP-999")
+    assert exc_info.value.message == "No Shipment with shipmentId SHP-999."

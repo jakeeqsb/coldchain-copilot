@@ -26,6 +26,7 @@ Three object types name the things the engine reads, their properties, and the c
 
 ```js
 { _id: "Shipment", kind: "objectType", collection: "shipments", key: "shipmentId",
+  period: { start: "departedAt", end: "deliveredAt" },
   properties: { cargoType: "CargoClass", contractRef: "Contract", temperaturePolicy: "range",
                 departedAt: "time", deliveredAt: "time", ... } }
 
@@ -56,6 +57,7 @@ cargo:seafood
 **Design choices**
 - `ancestors` is stored precomputed (MongoDB's *Array of Ancestors* tree pattern). Finding clauses for a cargo is one `$in` query, with no traversal. The hierarchy rarely changes, so the read path stays simple.
 - `shipments.cargoType` stores the class id itself (`cargo:live_fish`), so no mapping is needed.
+- An object type is read, not just described: `engine.load_object` takes `collection`, `key`, and `period` from it, so no code names the shipments collection or its date fields. `period` names the fields that bound the object's period; an empty end field means the period is still open (a shipment in transit ends now).
 
 ## 2. Links
 
@@ -211,7 +213,7 @@ Conditions combine with AND only. An article that cannot be expressed in this fo
 
 | Step | What | Uses |
 |---|---|---|
-| 1. Object | Read the shipment; period = `departedAt` → `deliveredAt` (or now) | object type `Shipment` |
+| 1. Object | Read the shipment and its period (start field → end field, or now while the end is empty) with `engine.load_object` | object type `Shipment`: `collection`, `key`, `period` |
 | 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors | classes, links, `ontology.applicable_clauses` |
 | 3. Detect | For each event type the clauses wait on, run its `detector`; check `requiresFields` were collected | event types → `registry.DETECTORS` |
 | 4. Compare | Compare each clause's conditions with the measures | rules + `rules.py` |

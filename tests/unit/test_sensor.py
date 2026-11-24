@@ -105,21 +105,6 @@ def test_window_over_max_is_rejected(kwargs: dict) -> None:
     assert exc_info.value.code == "WINDOW_TOO_LARGE"
 
 
-# --- shipment_period ---------------------------------------------------------
-
-
-def test_delivered_shipment_runs_departure_to_delivery() -> None:
-    departed = datetime(2026, 10, 12, tzinfo=timezone.utc)
-    delivered = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    shipment = {"departedAt": departed, "deliveredAt": delivered}
-    assert sensor.shipment_period(shipment, now=NOW) == (departed, delivered)
-
-
-def test_shipment_in_transit_runs_to_now_and_is_not_capped() -> None:
-    departed = NOW - timedelta(hours=100)  # longer than MAX_WINDOW_HOURS on purpose
-    assert sensor.shipment_period({"departedAt": departed}, now=NOW) == (departed, NOW)
-
-
 # --- bucket_size -------------------------------------------------------------
 
 

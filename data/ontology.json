@@ -1,5 +1,5 @@
 [
-  {"_id": "Shipment", "kind": "objectType", "collection": "shipments", "key": "shipmentId", "properties": {"shipmentId": "string", "fleetId": "string", "reeferId": "string", "shipperId": "string", "cargoType": "CargoClass", "contractRef": "Contract", "temperaturePolicy": "range", "departedAt": "time", "deliveredAt": "time"}},
+  {"_id": "Shipment", "kind": "objectType", "collection": "shipments", "key": "shipmentId", "period": {"start": "departedAt", "end": "deliveredAt"}, "properties": {"shipmentId": "string", "fleetId": "string", "reeferId": "string", "shipperId": "string", "cargoType": "CargoClass", "contractRef": "Contract", "temperaturePolicy": "range", "departedAt": "time", "deliveredAt": "time"}},
   {"_id": "Reading", "kind": "objectType", "collection": "readings", "timeSeries": true, "properties": {"ts": "time", "meta.shipmentId": "string", "meta.reeferId": "string", "meta.fleetId": "string", "meta.temperaturePolicy": "range", "temp": "number", "powerKw": "number", "doorOpen": "bool", "humidityPct": "number"}},
   {"_id": "Clause", "kind": "objectType", "collection": "clauses", "key": "clauseId", "properties": {"clauseId": "string", "contractId": "string", "version": "string", "appliesTo": "CargoClass", "trigger": "object", "action": "object", "deadline": "object", "references": "Clause", "chunkId": "string"}},
 

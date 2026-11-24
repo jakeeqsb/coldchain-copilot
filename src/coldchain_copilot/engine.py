@@ -3,8 +3,9 @@
 The engine reads names and connections from the ontology and runs the
 functions ``registry.py`` maps them to. For one shipment it takes six steps:
 
-1. Read the shipment object and fix its period (departure to delivery, or
-   to now while in transit).
+1. Read the shipment through its object type: the ontology says which
+   collection holds it, which field is its key, and which fields bound its
+   period (departure to delivery, or to now while in transit).
 2. Select applicable clauses: its contract version plus contract-free
    recommendations for its cargo class and ancestors (``ontology.py``).
 3. For every event type those clauses wait on, look up the event type's
@@ -50,11 +51,7 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         ToolError: ``NOT_FOUND`` if the shipment does not exist.
     """
     # 1. Object and period
-    shipment = db.collection(db.SHIPMENTS).find_one({"shipmentId": shipment_id}, {"_id": 0})
-    if shipment is None:
-        raise ToolError(ErrorCode.NOT_FOUND, f"Shipment {shipment_id} does not exist.")
-    start = shipment["departedAt"]
-    end = shipment.get("deliveredAt") or now or datetime.now(timezone.utc)
+    shipment, start, end = load_object("Shipment", shipment_id, now)
     scope = {"meta.shipmentId": shipment_id}
 
     # 2. Applicable clauses, and the ontology entries they use
@@ -97,3 +94,52 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         "results": results,
         "actions": actions,
     }
+
+
+def load_object(object_type: str, object_id: str, now: datetime | None = None) -> tuple[Doc, datetime, datetime]:
+    """Reads one object and its period, as its object type defines them.
+
+    The object type document says where the object lives and what bounds
+    its period, so the code names no collection or field::
+
+        {"_id": "Shipment", "collection": "shipments", "key": "shipmentId",
+         "period": {"start": "departedAt", "end": "deliveredAt"}, ...}
+
+    Used by the engine (step 1) and by tools that scope a query to a
+    shipment, so both use the same period.
+
+    Args:
+        object_type: An object type id, for example ``"Shipment"``. It must
+            define ``collection``, ``key``, and ``period``.
+        object_id: The value of the key field, for example ``"SHP-102"``.
+        now: End of the period while its end field is empty. Defaults to the
+            current time; tests pass a fixed value.
+
+    Returns:
+        ``(document, start, end)``; the document without ``_id``.
+
+    Raises:
+        ToolError: ``NOT_FOUND`` if no object has that key.
+    """
+    definition = ontology.ontology_docs({object_type})[object_type]
+    document = db.collection(definition["collection"]).find_one({definition["key"]: object_id}, {"_id": 0})
+    if document is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"No {object_type} with {definition['key']} {object_id}.")
+    return document, *object_period(document, definition["period"], now)
+
+
+def object_period(document: Doc, period: Doc, now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Returns an object's period from the fields its object type names.
+
+    An empty end field means the period is still open (a shipment in
+    transit), so it ends now. The period is not capped by
+    ``MAX_WINDOW_HOURS``: cumulative measures such as ``cumulativeMinutes``
+    are defined over the whole shipment.
+
+    Args:
+        document: The object, e.g. a shipment.
+        period: ``{"start": field, "end": field}`` from the object type.
+        now: End of an open period. Defaults to the current time.
+    """
+    end = document.get(period["end"]) or now or datetime.now(timezone.utc)
+    return document[period["start"]], end

@@ -194,13 +194,23 @@ Fixes the duplicated shipment period.
  └──────────────────────────────┘    engine step 1     tools/sensor.resolve
 ```
 
-- [ ] Add `period` to the `Shipment` object type.
-- [ ] `engine.load_object(object_type, object_id, now)` reads `collection`,
+- [x] Add `period` to the `Shipment` object type.
+- [x] `engine.load_object(object_type, object_id, now)` reads `collection`,
       `key`, and `period` from the ontology.
-- [ ] `evaluate_shipment` step 1 and `tools/sensor.resolve` use it; remove
+- [x] `evaluate_shipment` step 1 and `tools/sensor.resolve` use it; remove
       `sensor.shipment_period`.
-- [ ] Design check: the same function must fit a `Lot` object in another
+- [x] Design check: the same function must fit a `Lot` object in another
       domain (§ 6). Not implemented here.
+
+Result (2026-11-23). `engine.load_object` is the only code that reads a
+shipment for a period; `tests/integration/test_scenarios.py` checks that the
+engine and `sensor.resolve` return the same period, and `test_engine.py`
+checks `object_period` with another object type's fields (a pharma `Lot`).
+The "not found" message is now one message for both callers. Left for
+step 4: `catalog.py` does not yet check that `period` names properties of
+the object type. Left as is: `tools/lookup.get_shipment` still queries
+`shipments` directly, because finding a reefer's active shipment is a
+different query (not in this step's scope).
 
 ### Step 3. Causes as ontology data
 
@@ -388,7 +398,7 @@ equipment maintenance) should follow it in phase 1.
 |---|---|---|
 | 0 | done | clean-up and rules; latency unchanged (see step 0 result) |
 | 1 | done | model providers |
-| 2 | not started | objects through the ontology |
+| 2 | done | objects through the ontology |
 | 3 | not started | causes as data |
 | 4 | not started | catalog checks |
 | 5 | not started | agent and latency; needs `.env` |

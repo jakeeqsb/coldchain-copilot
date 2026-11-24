@@ -35,6 +35,7 @@ from typing import Any
 from coldchain_copilot import db
 from coldchain_copilot.config import get_settings
 from coldchain_copilot.detection import detect_power_anomaly, detect_temperature_excursion
+from coldchain_copilot.engine import load_object
 from coldchain_copilot.errors import ErrorCode, ToolError
 
 Doc = dict[str, Any]
@@ -374,16 +375,6 @@ def window(
     return window_start, window_end
 
 
-def shipment_period(shipment: Doc, now: datetime | None = None) -> tuple[datetime, datetime]:
-    """Returns a shipment's period: departure to delivery, or to now in transit.
-
-    Not capped by ``MAX_WINDOW_HOURS``: cumulative measures such as
-    ``cumulativeMinutes`` are defined over the whole shipment.
-    """
-    end = shipment.get("deliveredAt") or now or datetime.now(timezone.utc)
-    return shipment["departedAt"], end
-
-
 def resolve(
     fleet_id: str | None = None,
     reefer_id: str | None = None,
@@ -396,8 +387,9 @@ def resolve(
 ) -> tuple[Doc, datetime, datetime]:
     """Resolves scope and window for a tool call in one step.
 
-    With a ``shipment_id`` the window is the shipment period and ``hours`` /
-    ``start`` / ``end`` are ignored; otherwise :func:`window` applies with
+    With a ``shipment_id`` the window is the shipment period, the same one
+    the engine uses (``engine.load_object``), and ``hours`` / ``start`` /
+    ``end`` are ignored; otherwise :func:`window` applies with
     ``MAX_WINDOW_HOURS`` from the settings.
 
     Returns:
@@ -410,9 +402,7 @@ def resolve(
     scope = meta_filter(fleet_id, reefer_id, shipment_id)
 
     if shipment_id:
-        shipment = db.collection(db.SHIPMENTS).find_one({"shipmentId": shipment_id})
-        if shipment is None:
-            raise ToolError(ErrorCode.NOT_FOUND, f"No shipment with id {shipment_id}.")
-        return scope, *shipment_period(shipment, now)
+        _, start_at, end_at = load_object("Shipment", shipment_id, now)
+        return scope, start_at, end_at
 
     return scope, *window(hours, start, end, max_hours=get_settings().max_window_hours, now=now)
