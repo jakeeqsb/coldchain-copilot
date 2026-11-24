@@ -29,14 +29,15 @@ import json
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.runtime import Runtime
 
 from coldchain_copilot import db
 from coldchain_copilot.config import Settings, get_settings
@@ -102,6 +103,23 @@ For other questions, answer directly and briefly, with sources.
 # --------------------------------------------------------------------- graph
 
 
+@dataclass(frozen=True)
+class Context:
+    """Values one question runs with, passed in rather than read inside a node.
+
+    LangGraph hands this to every node as ``runtime.context`` (the graph's
+    ``context_schema``). It is not part of the saved conversation state.
+
+    Attributes:
+        now: The current time, timezone-aware. :func:`ask` sets it from the
+            clock; tests pass a fixed value so the prompt is the same on
+            every run. The prompt shows it in ``gateway.DISPLAY_TZ``, the
+            zone of every display string the tools return.
+    """
+
+    now: datetime
+
+
 def build_graph(model: Any, checkpointer: Any = None):
     """Builds and compiles the two-node agent graph.
 
@@ -113,13 +131,15 @@ def build_graph(model: Any, checkpointer: Any = None):
             :func:`build_agent`, an in-memory saver in tests.
 
     Returns:
-        The compiled graph. Invoke it with ``{"messages": [...]}`` and a
-        config naming the ``thread_id``.
+        The compiled graph. Invoke it with ``{"messages": [...]}``, a config
+        naming the ``thread_id``, and ``context=Context(now=...)``. Without a
+        context the prompt uses the clock.
     """
 
-    def llm(state: MessagesState) -> dict:
-        now = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
-        prompt = SystemMessage(SYSTEM_PROMPT.format(now=now))
+    def llm(state: MessagesState, runtime: Runtime[Context]) -> dict:
+        now = runtime.context.now if runtime.context else datetime.now(timezone.utc)
+        shown = now.astimezone(gateway.DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
+        prompt = SystemMessage(SYSTEM_PROMPT.format(now=shown))
         return {"messages": [model.invoke([prompt, *state["messages"]])]}
 
     def tools(state: MessagesState) -> dict:
@@ -135,7 +155,7 @@ def build_graph(model: Any, checkpointer: Any = None):
             ]
         }
 
-    graph = StateGraph(MessagesState)
+    graph = StateGraph(MessagesState, context_schema=Context)
     graph.add_node("llm", llm)
     graph.add_node("tools", tools)
     graph.add_edge(START, "llm")
@@ -177,13 +197,20 @@ def build_agent():
     return build_graph(chat_model(settings).bind_tools(gateway.SCHEMAS), checkpointer)
 
 
-def ask(agent: Any, question: str, thread_id: str) -> dict:
+def ask(agent: Any, question: str, thread_id: str, now: datetime | None = None) -> dict:
     """Sends one question in a thread and returns the answer with its stats.
 
     The thread's earlier messages are counted first, so the stats cover only
     what this question added, not the whole conversation. The graph is
     streamed node by node so the time of each ``llm`` and ``tools`` step can
     be added up separately.
+
+    Args:
+        agent: The compiled graph from :func:`build_agent` or :func:`build_graph`.
+        question: The user's question.
+        thread_id: Conversation to add the question to.
+        now: The current time for this question (:class:`Context`). Defaults
+            to the clock; tests pass a fixed value.
 
     Returns:
         ``{"answer": str, "stats": dict}``; see :func:`turn_stats`.
@@ -193,7 +220,8 @@ def ask(agent: Any, question: str, thread_id: str) -> dict:
 
     seconds = {"llm": 0.0, "tools": 0.0}
     started = last = time.perf_counter()
-    for update in agent.stream({"messages": [("user", question)]}, config, stream_mode="updates"):
+    context = Context(now=now or datetime.now(timezone.utc))
+    for update in agent.stream({"messages": [("user", question)]}, config, context=context, stream_mode="updates"):
         now = time.perf_counter()
         for node in update:
             seconds[node] = seconds.get(node, 0.0) + (now - last)

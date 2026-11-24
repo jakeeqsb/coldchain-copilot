@@ -313,9 +313,15 @@ document names (`[BlueHarbor 계약 제6조]`).
       rule; an LLM classifier only if needed) and a deterministic `collect`
       node that calls the gateway functions directly, then one `llm` call to
       write the briefing (rule G1).
-- [ ] Runtime context: pass `now` and the display time zone through
+- [x] Runtime context: pass `now` and the display time zone through
       `context_schema` instead of calling `datetime.now()` inside the node,
       so graph tests are deterministic.
+
+Result 5.3. `agent.Context(now)` is the graph's `context_schema`; `ask`
+takes `now` (default: the clock) and the `llm` node reads
+`runtime.context.now`. Only `now` is passed: the display zone stays
+`gateway.DISPLAY_TZ`, the one zone every tool's display strings use (rule
+D3), so the prompt and the tools cannot disagree.
 - [ ] Context size: trim large tool results from earlier turns of a thread
       (`trim_messages` or a short summary) before each model call.
 - [x] Split by entry point (rule C1): `agent.py` keeps the prompt, state,

@@ -9,6 +9,7 @@ graph stops when the model answers.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -168,3 +169,15 @@ def test_chat_model_comes_from_llm_model_with_openai_options(monkeypatch) -> Non
         ("openai:gpt-6.1-terra", {"use_responses_api": True, "reasoning": {"effort": "low"}}),
         ("anthropic:claude-sonnet-5-5", {}),  # OpenAI-only options are not sent to other providers
     ]
+
+
+def test_prompt_time_comes_from_the_context_in_the_display_zone() -> None:
+    model = ScriptedModel(AIMessage("First."), AIMessage("Second."))
+    graph = agent.build_graph(model, InMemorySaver())
+
+    agent.ask(graph, "one", "t8", now=datetime(2026, 10, 15, 3, 0, tzinfo=timezone.utc))
+    graph.invoke({"messages": [("user", "two")]}, config("t8"),
+                 context=agent.Context(now=datetime(2026, 10, 15, 15, 30, tzinfo=timezone.utc)))
+
+    assert "Current time: 2026-10-15 12:00 KST." in model.seen[0][0].content
+    assert "Current time: 2026-10-16 00:30 KST." in model.seen[1][0].content  # crosses midnight in KST
