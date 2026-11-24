@@ -13,7 +13,7 @@ job of the clauses, through `evaluate_obligations`.
 |---|---|---|---|
 | 1 · Lookup | `get_shipment` | Shipment, reefer, route, policy, contract | `shipments` find |
 | 2 · Sensor | `get_fleet_overview` | Per-shipment temperature, power, door summary | `readings` aggregation + `detect_temperature_excursion` |
-| 2 · Sensor | `find_excursions` | Out-of-range runs as events, with measures | `detect_temperature_excursion` |
+| 2 · Sensor | `find_excursions` | Out-of-range runs as events, with measures | `engine.detect_events` (`detect_temperature_excursion` + causes) |
 | 2 · Sensor | `find_energy_anomalies` | Power change vs. baseline, as a number | `detect_power_anomaly` |
 | 2 · Sensor | `get_reefer_timeline` | Time-bucketed temperature, power, door | `readings` aggregation (`$dateTrunc`) |
 | 3 · Documents | `search_knowledge` | Relevant chunks from contracts, SOPs, manuals | `$vectorSearch` (stage 4) |
@@ -107,7 +107,7 @@ Returns the `shipments` document as stored. The active shipment of a reefer is t
 }
 ```
 
-The tool calls `detect_temperature_excursion` with the resolved scope and window and returns its events unchanged, except for dropping runs shorter than `min_minutes`. The events are exactly the ones the engine sees. Excursions are computed per shipment, never across shipments, using each reading's own policy snapshot, and detection uses no `$lookup`.
+The tool runs `event:temperature_excursion` through `engine.detect_events` with the resolved scope and window, so causes are attached from the event type's `causes` exactly as in the engine, and returns the events unchanged, except for dropping runs shorter than `min_minutes`. The events are exactly the ones the engine sees. Excursions are computed per shipment, never across shipments, using each reading's own policy snapshot, and detection uses no `$lookup`.
 
 Cargo and the policy range are not repeated on each event: they are on the shipment, and the LLM gets them from `get_shipment`.
 

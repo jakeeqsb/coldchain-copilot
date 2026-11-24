@@ -3,6 +3,9 @@
 Expected values come from the seed scenarios and the dry-run output of
 scripts/seed.py. The window for each shipment is its shipment period:
 departedAt to now.
+
+Detectors do not set the ``cause`` measure; the engine attaches causes from
+the ontology, tested in tests/integration/test_scenarios.py.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ def period(mongo_db):
     return for_shipment
 
 
-def test_rf02_excursion_caused_by_compressor_stop(period) -> None:
+def test_rf02_excursion(period) -> None:
     [excursion] = detect_temperature_excursion(*period("SHP-102"))
 
     assert excursion["reeferId"] == "RF-02"
@@ -43,7 +46,7 @@ def test_rf02_excursion_caused_by_compressor_stop(period) -> None:
     assert excursion["measures"]["cumulativeMinutes"] == 24
     assert excursion["measures"]["direction"] == "above"
     assert excursion["measures"]["peakTemp"] > 4
-    assert excursion["measures"]["cause"] == "cause:compressor_stop"
+    assert "cause" not in excursion["measures"]
 
 
 def test_rf02_compressor_stop(period) -> None:
@@ -51,12 +54,11 @@ def test_rf02_compressor_stop(period) -> None:
     assert stop["measures"]["stopMinutes"] == 30
 
 
-def test_rf03_excursion_caused_by_door(period) -> None:
+def test_rf03_excursion_and_door_opening(period) -> None:
     [excursion] = detect_temperature_excursion(*period("SHP-103"))
     [door] = detect_door_opening(*period("SHP-103"))
 
     assert excursion["measures"]["consecutiveMinutes"] == 18
-    assert excursion["measures"]["cause"] == "cause:door_opening"
     assert door["measures"]["doorOpenMinutes"] == 15
 
 

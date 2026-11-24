@@ -101,14 +101,17 @@ db.clauses.aggregate([
 
 ### Event types
 
-An event type says which object it is observed on, which function detects it, which fields must be collected for "no event" to be trusted, and which measures the detector returns.
+An event type says which object it is observed on, which function detects it, which fields must be collected for "no event" to be trusted, which measures the detector returns, and optionally which event types can cause it.
 
 ```js
 { _id: "event:temperature_excursion", kind: "eventType", on: "Reading",
   detector: "detect_temperature_excursion",
   requiresFields: ["temp"],
+  causes: ["event:compressor_stop", "event:door_opening"],
   measures: ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"] }
 ```
+
+`causes` is a relation between event types, kept as data so it can be shown and edited. The order is the priority when two causes overlap one event. A detector knows nothing of causes: `engine.detect_events` runs each detector once, and for an event type with `causes` and at least one event, runs the cause detectors not yet run and sets the `cause` measure (`detection.attach_causes`). `catalog.py` rejects a `causes` entry that is not an event type.
 
 | Event type | Detector | Measures |
 |---|---|---|
@@ -130,7 +133,7 @@ Detectors live in `detection.py` and share one signature, `(scope, start, end) -
 | `consecutiveMinutes` | temperature_excursion | min | Length of one excursion: last − first out-of-range reading + 1 |
 | `cumulativeMinutes` | temperature_excursion | min | Sum of `consecutiveMinutes` over the shipment period (`departedAt` to `deliveredAt`, or now) |
 | `peakTemp` / `lowestTemp` | temperature_excursion | °C | Max / min temperature during the excursion |
-| `cause` | temperature_excursion | — | `cause:compressor_stop`, `cause:door_opening`, or `cause:unknown`, from overlapping events |
+| `cause` | temperature_excursion | — | `cause:compressor_stop`, `cause:door_opening`, or `cause:unknown`: the first type in `causes` with an event on the same shipment overlapping in time |
 | `doorOpenMinutes` | door_opening | min | Length of one continuous door-open run |
 | `stopMinutes` | compressor_stop | min | Length of one run with `powerKw < 0.1` |
 | `powerChangePct` | power_anomaly | % | Last 24 h average power vs. the preceding 48 h, as a percentage change |
@@ -215,7 +218,7 @@ Conditions combine with AND only. An article that cannot be expressed in this fo
 |---|---|---|
 | 1. Object | Read the shipment and its period (start field → end field, or now while the end is empty) with `engine.load_object` | object type `Shipment`: `collection`, `key`, `period` |
 | 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors | classes, links, `ontology.applicable_clauses` |
-| 3. Detect | For each event type the clauses wait on, run its `detector`; check `requiresFields` were collected | event types → `registry.DETECTORS` |
+| 3. Detect | With `engine.detect_events`, run each event type's `detector` once, plus its `causes` when it has events, and attach causes; check `requiresFields` were collected | event types (`detector`, `causes`) → `registry.DETECTORS` |
 | 4. Compare | Compare each clause's conditions with the measures | rules + `rules.py` |
 | 5. Follow | For each triggered clause, list clauses that reference it | link `references` → `registry.TRAVERSERS` |
 | 6. Act | For each triggered clause, run its action type's handler | action types → `registry.ACTIONS` |

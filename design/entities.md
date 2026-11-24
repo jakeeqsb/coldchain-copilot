@@ -157,6 +157,7 @@ Definitions, not data. 32 documents of six kinds. Kept as a collection, not code
 
 { _id: "event:temperature_excursion", kind: "eventType", on: "Reading",
   detector: "detect_temperature_excursion", requiresFields: ["temp"],
+  causes: ["event:compressor_stop", "event:door_opening"],
   measures: ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"] }
 
 { _id: "rel:references", kind: "linkType", from: "Clause", to: "Clause", traverse: "follow_references" }

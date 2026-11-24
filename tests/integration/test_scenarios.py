@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from coldchain_copilot import engine
+from coldchain_copilot import engine, registry
 from coldchain_copilot.errors import ToolError
 from coldchain_copilot.tools import sensor
 
@@ -112,3 +112,26 @@ def test_unknown_object_names_its_type_and_key(mongo_db) -> None:
     with pytest.raises(ToolError) as exc_info:
         engine.load_object("Shipment", "SHP-999")
     assert exc_info.value.message == "No Shipment with shipmentId SHP-999."
+
+
+@pytest.mark.parametrize(("shipment_id", "cause"), [("SHP-102", "cause:compressor_stop"),
+                                                    ("SHP-103", "cause:door_opening")])
+def test_detect_events_attaches_the_cause_from_the_ontology(mongo_db, shipment_id: str, cause: str) -> None:
+    _, start, end = engine.load_object("Shipment", shipment_id)
+    events = engine.detect_events({"event:temperature_excursion"}, {"meta.shipmentId": shipment_id}, start, end)
+
+    [excursion] = events["event:temperature_excursion"]
+    assert excursion["measures"]["cause"] == cause
+
+
+def test_evaluation_runs_each_detector_once(mongo_db, monkeypatch) -> None:
+    calls: list[str] = []
+
+    def counted(name, detector):
+        return lambda *args: calls.append(name) or detector(*args)
+
+    monkeypatch.setattr(registry, "DETECTORS", {n: counted(n, d) for n, d in registry.DETECTORS.items()})
+    engine.evaluate_shipment("SHP-102")  # its clauses wait on the excursion and both of its causes
+
+    assert {"detect_compressor_stop", "detect_door_opening", "detect_temperature_excursion"} <= set(calls)
+    assert len(calls) == len(set(calls))

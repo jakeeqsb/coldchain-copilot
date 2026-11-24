@@ -18,7 +18,7 @@
   {"_id": "rel:triggeredBy", "kind": "linkType", "from": "Clause", "to": "EventType"},
   {"_id": "rel:references", "kind": "linkType", "from": "Clause", "to": "Clause", "traverse": "follow_references"},
 
-  {"_id": "event:temperature_excursion", "kind": "eventType", "on": "Reading", "detector": "detect_temperature_excursion", "requiresFields": ["temp"], "measures": ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"]},
+  {"_id": "event:temperature_excursion", "kind": "eventType", "on": "Reading", "detector": "detect_temperature_excursion", "requiresFields": ["temp"], "causes": ["event:compressor_stop", "event:door_opening"], "measures": ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"]},
   {"_id": "event:door_opening", "kind": "eventType", "on": "Reading", "detector": "detect_door_opening", "requiresFields": ["doorOpen"], "measures": ["doorOpenMinutes"]},
   {"_id": "event:compressor_stop", "kind": "eventType", "on": "Reading", "detector": "detect_compressor_stop", "requiresFields": ["powerKw"], "measures": ["stopMinutes"]},
   {"_id": "event:humidity_breach", "kind": "eventType", "on": "Reading", "detector": "detect_humidity_breach", "requiresFields": ["humidityPct"], "measures": ["humidityMinutes", "minHumidityPct"]},

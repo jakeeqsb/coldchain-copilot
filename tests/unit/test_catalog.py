@@ -124,6 +124,10 @@ def _required_field_not_a_property(c: Catalog) -> None:
     ontology_doc(c, "event:humidity_breach")["requiresFields"] = ["humidity"]
 
 
+def _cause_not_an_event_type(c: Catalog) -> None:
+    ontology_doc(c, "event:temperature_excursion")["causes"] = ["event:compressor_stop", "event:door_ajar"]
+
+
 def _chained_clause_not_in_references(c: Catalog) -> None:
     clause(c, ART7)["references"] = []
 
@@ -137,6 +141,8 @@ BROKEN_CASES: list[tuple[str, Callable[[Catalog], None], list[str]]] = [
      ["rel:references: traverse cypher_references is not registered"]),
     ("required field not a property", _required_field_not_a_property,
      ["event:humidity_breach: required field humidity is not a property of Reading"]),
+    ("cause not an event type", _cause_not_an_event_type,
+     ["event:temperature_excursion: cause event:door_ajar is not an event type"]),
     ("chained clause not in references", _chained_clause_not_in_references,
      [f"{ART7}: clauseTriggered {ART6} is missing from references"]),
     ("unknown measure", _unknown_measure,

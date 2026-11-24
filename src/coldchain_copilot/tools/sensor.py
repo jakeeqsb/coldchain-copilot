@@ -7,8 +7,9 @@ Four tools, all read-only:
 - ``get_fleet_overview``: one summary row per shipment in a fleet.
 - ``get_reefer_timeline``: one reefer's readings in time buckets.
 
-The first two call the detectors in ``detection.py`` and return their events
-unchanged, so the LLM sees exactly what the engine judges. They add no
+The first two call the same detectors as the engine (``find_excursions``
+through ``engine.detect_events``, which also attaches causes) and return
+their events unchanged, so the LLM sees exactly what the engine judges. They add no
 thresholds of their own: whether an event needs action is decided by the
 clauses, through ``evaluate_obligations``.
 
@@ -35,10 +36,12 @@ from typing import Any
 from coldchain_copilot import db
 from coldchain_copilot.config import get_settings
 from coldchain_copilot.detection import detect_power_anomaly, detect_temperature_excursion
-from coldchain_copilot.engine import load_object
+from coldchain_copilot.engine import detect_events, load_object
 from coldchain_copilot.errors import ErrorCode, ToolError
 
 Doc = dict[str, Any]
+
+EXCURSION = "event:temperature_excursion"
 
 DEFAULT_HOURS = 24
 """Window length when a fleet or reefer call gives neither hours nor times."""
@@ -61,9 +64,10 @@ def find_excursions(
 ) -> Doc:
     """Finds runs of temperature outside each shipment's policy range.
 
-    Calls ``detect_temperature_excursion`` with the resolved scope and window
-    and keeps runs of at least ``min_minutes``, so a single stray reading does
-    not show up as an incident. The events are the detector's own: measures
+    Runs ``event:temperature_excursion`` through ``engine.detect_events``
+    with the resolved scope and window, so causes are attached exactly as in
+    the engine, and keeps runs of at least ``min_minutes``, so a single stray
+    reading does not show up as an incident. Measures:
     ``direction``, ``consecutiveMinutes``, ``cumulativeMinutes``, ``peakTemp``,
     ``lowestTemp``, and ``cause``. Cargo and the policy range are on the
     shipment (``get_shipment``).
@@ -81,7 +85,7 @@ def find_excursions(
         ``{"scope", "window", "events"}``.
     """
     scope, window_start, window_end = resolve(fleet_id, reefer_id, shipment_id, hours, start, end)
-    events = detect_temperature_excursion(scope, window_start, window_end)
+    events = detect_events({EXCURSION}, scope, window_start, window_end)[EXCURSION]
     return {
         "scope": scope,
         "window": {"start": window_start, "end": window_end},
@@ -130,7 +134,8 @@ def get_fleet_overview(
     One row per shipment: average, min, max, and last temperature, average
     power, door-open minutes, and the number of temperature excursions. The
     excursion count comes from ``detect_temperature_excursion``, so it always
-    matches ``find_excursions`` for the same window.
+    matches ``find_excursions`` for the same window. Only the count is used,
+    so no causes are looked up.
 
     Args:
         fleet_id: Fleet to summarize.

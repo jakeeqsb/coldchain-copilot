@@ -174,6 +174,7 @@ def find_catalog_problems(catalog: Catalog, chunk_ids: set[str]) -> list[str]:
           in ``registry.py``.
         * An event type's ``on`` is an object type, and its
           ``requiresFields`` are properties of that type.
+        * Every ``causes`` entry of an event type is an event type.
 
     Shipment checks:
         * Its contract version has at least one clause.
@@ -210,6 +211,9 @@ def find_catalog_problems(catalog: Catalog, chunk_ids: set[str]) -> list[str]:
             for field in ev["requiresFields"]:
                 if field not in obj["properties"]:
                     problems.append(f"{eid}: required field {field} is not a property of {ev['on']}")
+        for cause in ev.get("causes", []):
+            if cause not in event_types:
+                problems.append(f"{eid}: cause {cause} is not an event type")
     for aid, action in of_kind("actionType").items():
         if action["handler"] not in registry.ACTIONS:
             problems.append(f"{aid}: handler {action['handler']} is not registered")

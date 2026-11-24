@@ -9,8 +9,10 @@ functions ``registry.py`` maps them to. For one shipment it takes six steps:
 2. Select applicable clauses: its contract version plus contract-free
    recommendations for its cargo class and ancestors (``ontology.py``).
 3. For every event type those clauses wait on, look up the event type's
-   ``detector`` and run it over the shipment period. Also check whether the
-   fields it requires were collected at all.
+   ``detector`` and run it over the shipment period, once. An event type
+   that lists ``causes`` gets the cause detectors run too, and each event
+   is tagged with the cause it overlaps (:func:`detect_events`). Also check
+   whether the fields each event type requires were collected at all.
 4. Compare each clause's conditions with the detected measures (``rules.py``).
 5. For each triggered clause, follow ``rel:references`` with the link type's
    ``traverse`` function to list the clauses that build on it.
@@ -60,16 +62,12 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
     action_ids = {f"action:{c['action']['type']}" for c in clauses}
     defs = ontology.ontology_docs(event_ids | action_ids | {REFERENCES})
 
-    # 3. Detect events through each event type's detector
-    events_by_type: dict[str, list[Doc]] = {}
-    collected_by_type: dict[str, bool] = {}
-    for event_id in sorted(event_ids):
-        event_type = defs[event_id]
-        detector = registry.DETECTORS[event_type["detector"]]
-        events_by_type[event_id] = detector(scope, start, end)
-        collected_by_type[event_id] = all(
-            detection.field_collected(field, scope, start, end) for field in event_type["requiresFields"]
-        )
+    # 3. Detect events through each event type's detector, with causes attached
+    events_by_type = detect_events(event_ids, scope, start, end)
+    collected_by_type = {
+        event_id: all(detection.field_collected(field, scope, start, end) for field in defs[event_id]["requiresFields"])
+        for event_id in event_ids
+    }
 
     # 4. Compare conditions
     results = rules.evaluate_clauses(clauses, events_by_type, collected_by_type)
@@ -94,6 +92,53 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         "results": results,
         "actions": actions,
     }
+
+
+def detect_events(event_ids: set[str], scope: Doc, start: datetime, end: datetime) -> dict[str, list[Doc]]:
+    """Runs each event type's detector once and attaches causes.
+
+    An event type may list the event types that can cause it, in priority
+    order::
+
+        {"_id": "event:temperature_excursion", ...,
+         "causes": ["event:compressor_stop", "event:door_opening"]}
+
+    When such an event type has events, the cause detectors not already run
+    are run, and :func:`detection.attach_causes` sets each event's ``cause``
+    measure. With no events, the cause detectors are skipped.
+
+    Used by the engine (step 3) and by ``find_excursions``, so both report
+    the same cause.
+
+    Args:
+        event_ids: Event type ids, for example ``{"event:temperature_excursion"}``.
+        scope: Reading metadata filter, e.g. ``{"meta.shipmentId": "SHP-102"}``.
+        start: Window start.
+        end: Window end (exclusive).
+
+    Returns:
+        Events keyed by event type id: every id asked for, plus any cause
+        type that was run.
+    """
+    defs = ontology.ontology_docs(event_ids)
+    found: dict[str, list[Doc]] = {}
+
+    def run(event_id: str) -> None:
+        found[event_id] = registry.DETECTORS[defs[event_id]["detector"]](scope, start, end)
+
+    for event_id in sorted(event_ids):
+        run(event_id)
+    for event_id in sorted(event_ids):
+        causes = defs[event_id].get("causes", [])
+        if not (causes and found[event_id]):
+            continue
+        missing = [c for c in causes if c not in found]
+        if missing:
+            defs.update(ontology.ontology_docs(set(missing)))
+            for cause_id in missing:
+                run(cause_id)
+        detection.attach_causes(found[event_id], {c: found[c] for c in causes})
+    return found
 
 
 def load_object(object_type: str, object_id: str, now: datetime | None = None) -> tuple[Doc, datetime, datetime]:

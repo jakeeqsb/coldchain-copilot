@@ -228,14 +228,24 @@ Fixes the duplicated aggregations and makes the causal relation visible.
                                                  3. attach_causes by time overlap
 ```
 
-- [ ] Add `causes` (ordered = priority) to `event:temperature_excursion`.
-- [ ] One engine-layer function runs the needed detectors once per
+- [x] Add `causes` (ordered = priority) to `event:temperature_excursion`.
+- [x] One engine-layer function runs the needed detectors once per
       evaluation and attaches causes; `engine` and `find_excursions` both use
       it. `detect_temperature_excursion` no longer calls other detectors.
-- [ ] `catalog.py` checks that every `causes` entry is an event type.
+- [x] `catalog.py` checks that every `causes` entry is an event type.
 
 The cost saved is small (tools take ~0.1 s in total). The point is that the
 relation becomes data a builder can show and edit.
+
+Result (2026-11-24). `engine.detect_events(event_ids, scope, start, end)`
+runs each detector once; cause detectors run only when the event type has
+events, as before. `get_fleet_overview` needs only the excursion count, so
+it calls the detector directly and looks up no causes (two aggregations
+fewer, same count). Engine results for all five shipments and
+`find_excursions` events are byte-identical to the previous commit.
+`test_scenarios.py` checks that one evaluation runs each detector once;
+the cause checks moved there from `test_detection_db.py`, because a
+detector alone no longer sets `cause`.
 
 ### Step 4. Stronger catalog checks
 
@@ -325,7 +335,7 @@ Requires `.env` (OpenAI and Voyage keys) to measure.
 | `registry.py` | structure | the registered functions |
 | `engine.py` | the six steps | `Shipment` hard-coding (removed in step 2) |
 | `ontology.py` | `dependent_clauses`, `ontology_docs` | `applicable_clauses` (contract and cargo rules) |
-| `detection.py` | `run_pipeline`, `trend_pipeline`, `attach_causes` | the five `detect_*` functions |
+| `detection.py` | `run_pipeline`, `trend_pipeline`, `attach_causes` | the five `detect_*` functions (causes moved to the ontology in step 3) |
 | `catalog.py` | name-resolution checks | `chunkId` format, `cargo_specs` |
 | `ingest.py` | structure-based chunking, embedding, index | the `Article|Section` heading pattern |
 | `tools/` | `gateway` skeleton, `documents`, `adhoc` | `sensor`, `lookup` |
@@ -399,7 +409,7 @@ equipment maintenance) should follow it in phase 1.
 | 0 | done | clean-up and rules; latency unchanged (see step 0 result) |
 | 1 | done | model providers |
 | 2 | done | objects through the ontology |
-| 3 | not started | causes as data |
+| 3 | done | causes as data |
 | 4 | not started | catalog checks |
 | 5 | not started | agent and latency; needs `.env` |
 | 6 | not started | documents |
