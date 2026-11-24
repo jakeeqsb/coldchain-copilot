@@ -120,7 +120,7 @@ def external_imports(path: Path) -> set[str]:
 def test_the_parser_finds_both_import_styles() -> None:
     # engine.py uses relative imports, tools/gateway.py absolute ones.
     assert {"db", "detection", "ontology", "registry", "rules", "errors"} <= internal_imports(SRC / "engine.py")
-    assert {"engine", "errors", "tools.adhoc", "tools.sensor"} <= internal_imports(SRC / "tools" / "gateway.py")
+    assert {"errors", "tools.adhoc", "tools.briefing", "tools.sensor"} <= internal_imports(SRC / "tools" / "gateway.py")
 
 
 def test_every_module_has_a_layer() -> None:

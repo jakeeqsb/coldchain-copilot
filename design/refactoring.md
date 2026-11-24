@@ -309,10 +309,35 @@ and use `get_clause` only for other clauses. Three runs each, before → after:
 
 Citations changed from chunk ids (`[blueharbor-live-fish-v1-article-6]`) to
 document names (`[BlueHarbor 계약 제6조]`).
-- [ ] Briefing path: a `route` node (start simple: a CLI flag or a keyword
+- [x] Briefing path: a `route` node (start simple: a CLI flag or a keyword
       rule; an LLM classifier only if needed) and a deterministic `collect`
       node that calls the gateway functions directly, then one `llm` call to
-      write the briefing (rule G1).
+      write the briefing (rule G1). Done as a tool instead; see result 5.4.
+
+Result 5.4 (2026-11-24). Tried first as planned, with an LLM `route` node
+(structured output) and a `collect` node. Measured per node: `route` took
+4–5 s, because one call to this model costs 3–4 s however short the
+answer. Briefings got a little faster (~26 → ~22 s), but every other
+question paid the route call (SHP-102: ~8 → ~15 s). Dropped. Instead,
+`collect_fleet_briefing(fleet_id)` (`tools/briefing.py`, level 4) makes the
+same calls in code in a fixed order, and the model chooses it in the call
+it makes anyway: no extra call, the graph is unchanged. `evaluate_obligations`
+moved to the same module (it was in the gateway; the briefing tool needs
+it, and the gateway imports the tools, not the other way round).
+
+Writing the briefing is now the floor: one call producing ~1,200 tokens
+takes ~18 s, whatever happens before it.
+
+Interleaved runs, last commit (5.3) and this code at the same time (API
+latency varied a lot: the unchanged SHP-102 path ranged 7–21 s):
+
+| FLEET-01 briefing | Time (s) | LLM calls | Input tokens |
+|---|---|---|---|
+| before (5.3) | 38.4 / 38.2 / 29.0 | 4 / 4 / 3 | 30k / 30k / 19k |
+| after | 23.9 / 29.9 / 24.2 | 2 / 2 / 2 | 15.4k every run |
+
+The model no longer chooses how many calls to make, so the cost of a
+briefing is the same on every run.
 - [x] Runtime context: pass `now` and the display time zone through
       `context_schema` instead of calling `datetime.now()` inside the node,
       so graph tests are deterministic.
@@ -334,8 +359,16 @@ measuring a question is the agent's job, and keeping them there means
 `agent.py` never imports `cli.py`. `cli.py` has `main`, `show`, and
 `format_stats` (display only). The `coldchain-copilot` command now points to
 `cli:main`. No behaviour changed.
-- [ ] (D) Token streaming with `stream_mode="messages"` in the CLI; LangSmith
+- [x] (D) Token streaming with `stream_mode="messages"` in the CLI; LangSmith
       tracing switched on by environment variables only.
+
+Result 5.6. `ask` streams `updates` and `messages` together and passes the
+`llm` node's text to `on_token`; the CLI prints it as it comes and adds
+`first text` to the stats line. In the runs above, the briefing's first text
+appeared after 4–16 s instead of the whole 24–30 s. LangSmith needs no code:
+`.env` is loaded into the environment, and LangChain reads
+`LANGSMITH_TRACING` and `LANGSMITH_API_KEY` from there (see `.env.example`).
+Done before 5.5 at the user's request.
 - [ ] Measure before and after with `turn_stats`; record the numbers here.
 
 Requires `.env` (OpenAI and Voyage keys) to measure.

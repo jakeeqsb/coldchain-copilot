@@ -181,3 +181,15 @@ def test_prompt_time_comes_from_the_context_in_the_display_zone() -> None:
 
     assert "Current time: 2026-10-15 12:00 KST." in model.seen[0][0].content
     assert "Current time: 2026-10-16 00:30 KST." in model.seen[1][0].content  # crosses midnight in KST
+
+
+def test_on_token_gets_the_answer_text_but_not_tool_results(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"secret": "tool output"})
+    model = ScriptedModel(AIMessage("", tool_calls=[tool_call("get_shipment", {}, "c1")]), AIMessage("Briefing."))
+    graph = agent.build_graph(model, InMemorySaver())
+    tokens: list[str] = []
+
+    result = agent.ask(graph, "brief", "t9", on_token=tokens.append)
+
+    assert "".join(tokens) == result["answer"] == "Briefing."
+    assert result["stats"]["first_text_seconds"] >= 0

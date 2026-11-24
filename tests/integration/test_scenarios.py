@@ -145,3 +145,16 @@ def test_triggered_clause_carries_its_source_text(mongo_db) -> None:
     art6, art8 = by_clause["blueharbor-live-fish-v1-art6"], by_clause["blueharbor-live-fish-v1-art8"]
     assert art6["source"].endswith("§ Article 6") and "15 consecutive minutes" in art6["text"]
     assert art8["status"] == "not_triggered" and art8["source"].endswith("§ Article 8") and "text" not in art8
+
+
+def test_fleet_briefing_matches_the_single_tools(mongo_db) -> None:
+    from coldchain_copilot.tools import briefing
+
+    result = briefing.collect_fleet_briefing("FLEET-01")
+
+    # Which shipments are in the last 24 hours depends on when seed.py ran, so
+    # the test checks consistency, not a fixed list.
+    by_shipment = {s["shipment"]["shipmentId"]: s["obligations"] for s in result["shipments"]}
+    assert list(by_shipment) == [row["shipmentId"] for row in result["overview"]["shipments"]]
+    for shipment_id, obligations in by_shipment.items():
+        assert obligations["results"] == briefing.evaluate_obligations(shipment_id)["results"]

@@ -34,9 +34,8 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
-from coldchain_copilot import engine
 from coldchain_copilot.errors import ErrorCode, ToolError
-from coldchain_copilot.tools import adhoc, documents, lookup, sensor
+from coldchain_copilot.tools import adhoc, briefing, documents, lookup, sensor
 
 Doc = dict[str, Any]
 
@@ -50,19 +49,6 @@ LOCAL_KEYS = frozenset({"start", "end", "deadline"})
 # ------------------------------------------------------------------ functions
 
 
-def evaluate_obligations(shipment_id: str) -> Doc:
-    """Returns the engine's result for a shipment without ``actions``.
-
-    ``actions`` are the action handlers' briefing items. Today each repeats a
-    triggered result (action, party, deadline, event, chunk), so the LLM
-    would read the same facts twice. The engine keeps producing them: a
-    handler is where a real deployment would send a notice or open a work
-    order.
-    """
-    result = engine.evaluate_shipment(shipment_id)
-    return {key: value for key, value in result.items() if key != "actions"}
-
-
 FUNCTIONS: dict[str, Callable[..., Doc]] = {
     "get_shipment": lookup.get_shipment,
     "find_excursions": sensor.find_excursions,
@@ -71,10 +57,11 @@ FUNCTIONS: dict[str, Callable[..., Doc]] = {
     "get_reefer_timeline": sensor.get_reefer_timeline,
     "search_knowledge": documents.search_knowledge,
     "get_clause": documents.get_clause,
-    "evaluate_obligations": evaluate_obligations,
+    "evaluate_obligations": briefing.evaluate_obligations,
+    "collect_fleet_briefing": briefing.collect_fleet_briefing,
     "run_aggregation": adhoc.run_aggregation,
 }
-"""Tool name → function. ``evaluate_obligations`` is the engine, minus one field."""
+"""Tool name → function."""
 
 
 
@@ -189,6 +176,15 @@ SCHEMAS: list[Doc] = [
         "this for any question about obligations, deadlines, or what to do.",
         {"shipment_id": _SCOPE["shipment_id"] | {"description": "Shipment id, e.g. SHP-102."}},
         ["shipment_id"],
+    ),
+    _tool(
+        "collect_fleet_briefing",
+        "Everything a briefing on a whole fleet needs, in one call: the fleet overview, "
+        "excursions, and energy anomalies over the last 24 hours, and for each shipment in the "
+        "fleet its details (cargo, policy range) and evaluate_obligations result. Use it for a "
+        "briefing, status report, or overview of a fleet instead of calling those tools one by one.",
+        {"fleet_id": _SCOPE["fleet_id"]},
+        ["fleet_id"],
     ),
     _tool(
         "run_aggregation",

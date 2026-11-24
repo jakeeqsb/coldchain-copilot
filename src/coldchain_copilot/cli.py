@@ -6,7 +6,8 @@ Run it:
     uv run coldchain-copilot --thread demo-1       # continue a thread
     uv run coldchain-copilot -q "Brief me on FLEET-01"
 
-Each answer is followed by one stats line for that question: elapsed time
+The answer is printed as the model writes it, followed by one stats line
+for that question: elapsed time
 split into model time and tool time, LLM calls, tokens, and the tools called
 (with how many came back as errors).
 
@@ -33,28 +34,43 @@ def main(argv: list[str] | None = None) -> None:
     thread_id = args.thread or f"cli-{uuid.uuid4().hex[:8]}"
 
     if args.question:
-        show(ask(agent, args.question, thread_id))
+        answer(agent, args.question, thread_id)
         return
 
     print(f"thread {thread_id}  (empty line to quit)")
     while question := input("\n> ").strip():
-        show(ask(agent, question, thread_id))
+        answer(agent, question, thread_id)
 
 
-def show(result: dict) -> None:
-    """Prints an answer followed by its stats line."""
-    print("\n" + result["answer"])
-    print("\n── " + format_stats(result["stats"]))
+def answer(agent, question: str, thread_id: str) -> None:
+    """Asks one question, printing the answer as it streams, then its stats line.
+
+    If the model streamed no text (a provider without token streaming), the
+    whole answer is printed at the end instead.
+    """
+    print()
+    streamed: list[str] = []
+
+    def on_token(text: str) -> None:
+        streamed.append(text)
+        print(text, end="", flush=True)
+
+    result = ask(agent, question, thread_id, on_token=on_token)
+    if not streamed:
+        print(result["answer"], end="")
+    print("\n\n── " + format_stats(result["stats"]))
 
 
 def format_stats(stats: dict) -> str:
     """One line for the terminal.
 
-    For example ``12.4s (LLM 10.9s, tools 1.3s) · LLM 3 · tokens 8,213 in / 1,045 out · tools 6 ...``.
-    The time split appears only when ``agent.ask`` measured it.
+    For example ``12.4s (LLM 10.9s, tools 1.3s, first text 4.2s) · LLM 3 · tokens 8,213 in / 1,045 out · ...``.
+    The time split appears only when ``agent.ask`` measured it, and the first
+    text time only when the answer was streamed.
     """
     tools = ", ".join(f"{name}×{count}" for name, count in sorted(stats["tools"].items())) or "none"
-    split = f" (LLM {stats['llm_seconds']}s, tools {stats['tool_seconds']}s)" if "llm_seconds" in stats else ""
+    first = f", first text {stats['first_text_seconds']}s" if "first_text_seconds" in stats else ""
+    split = f" (LLM {stats['llm_seconds']}s, tools {stats['tool_seconds']}s{first})" if "llm_seconds" in stats else ""
     return (
         f"{stats['seconds']}s{split} · LLM {stats['llm_calls']} · "
         f"tokens {stats['input_tokens']:,} in / {stats['output_tokens']:,} out · "

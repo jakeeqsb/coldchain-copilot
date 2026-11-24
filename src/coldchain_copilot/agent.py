@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import time
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -197,13 +198,21 @@ def build_agent():
     return build_graph(chat_model(settings).bind_tools(gateway.SCHEMAS), checkpointer)
 
 
-def ask(agent: Any, question: str, thread_id: str, now: datetime | None = None) -> dict:
+def ask(
+    agent: Any,
+    question: str,
+    thread_id: str,
+    now: datetime | None = None,
+    on_token: Callable[[str], None] | None = None,
+) -> dict:
     """Sends one question in a thread and returns the answer with its stats.
 
     The thread's earlier messages are counted first, so the stats cover only
     what this question added, not the whole conversation. The graph is
-    streamed node by node so the time of each ``llm`` and ``tools`` step can
-    be added up separately.
+    streamed in two modes at once: ``updates`` (one event per finished node,
+    so the time of each ``llm`` and ``tools`` step can be added up
+    separately) and ``messages`` (the model's text as it is generated, passed
+    to ``on_token``).
 
     Args:
         agent: The compiled graph from :func:`build_agent` or :func:`build_graph`.
@@ -211,17 +220,32 @@ def ask(agent: Any, question: str, thread_id: str, now: datetime | None = None) 
         thread_id: Conversation to add the question to.
         now: The current time for this question (:class:`Context`). Defaults
             to the clock; tests pass a fixed value.
+        on_token: Called with each piece of text the ``llm`` node generates,
+            so a front end can show the answer while it is written. Reasoning
+            and tool calls are not passed.
 
     Returns:
-        ``{"answer": str, "stats": dict}``; see :func:`turn_stats`.
+        ``{"answer": str, "stats": dict}``; see :func:`turn_stats`. With
+        ``on_token``, the stats also have ``first_text_seconds``: how long
+        until the first text was passed on.
     """
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
     before = len(agent.get_state(config).values.get("messages", []))
 
     seconds = {"llm": 0.0, "tools": 0.0}
+    first_text: float | None = None
     started = last = time.perf_counter()
     context = Context(now=now or datetime.now(timezone.utc))
-    for update in agent.stream({"messages": [("user", question)]}, config, context=context, stream_mode="updates"):
+    stream = agent.stream({"messages": [("user", question)]}, config, context=context, stream_mode=["updates", "messages"])
+    for mode, update in stream:
+        if mode == "messages":
+            token, metadata = update
+            # A streaming model sends AIMessageChunks; one that cannot stream
+            # sends its whole reply once, as an AIMessage (the chunk's base class).
+            if on_token and metadata.get("langgraph_node") == "llm" and isinstance(token, AIMessage) and token.text:
+                first_text = first_text or time.perf_counter() - started
+                on_token(token.text)
+            continue
         now = time.perf_counter()
         for node in update:
             seconds[node] = seconds.get(node, 0.0) + (now - last)
@@ -230,6 +254,8 @@ def ask(agent: Any, question: str, thread_id: str, now: datetime | None = None) 
     messages = agent.get_state(config).values["messages"]
     stats = turn_stats(messages[before:], last - started)
     stats["llm_seconds"], stats["tool_seconds"] = round(seconds["llm"], 1), round(seconds["tools"], 1)
+    if first_text is not None:
+        stats["first_text_seconds"] = round(first_text, 1)
     # .text joins the text blocks: newer models return content as a list of
     # blocks (reasoning, text, ...) rather than one string.
     return {"answer": messages[-1].text, "stats": stats}

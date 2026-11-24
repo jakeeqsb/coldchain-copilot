@@ -284,11 +284,12 @@ coldchain-copilot/
 │   ├── registry.py        Ontology function names → functions
 │   ├── engine.py          Evaluate one shipment: clauses → detect → compare → follow → act
 │   ├── ingest.py          Documents → one chunk per Article/Section → embeddings
-│   ├── tools/             The LLM's 9 tools; gateway.py is its only entrance
+│   ├── tools/             The LLM's 10 tools; gateway.py is its only entrance
 │   │   ├── gateway.py     Tool schemas, dispatch, error and time serialization
 │   │   ├── lookup.py      get_shipment
 │   │   ├── sensor.py      find_excursions, find_energy_anomalies, get_fleet_overview, get_reefer_timeline
 │   │   ├── documents.py   search_knowledge ($vectorSearch), get_clause
+│   │   ├── briefing.py    evaluate_obligations, collect_fleet_briefing
 │   │   └── adhoc.py       run_aggregation (guarded)
 │   ├── agent.py           LangGraph agent (llm ⇄ tools, MongoDBSaver checkpoints)
 │   └── cli.py             Terminal chat: uv run coldchain-copilot
