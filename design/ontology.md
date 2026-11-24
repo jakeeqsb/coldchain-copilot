@@ -22,7 +22,7 @@ Out of scope for the MVP: authoring tools. The ontology and clauses are hand-wri
 
 ## 1. What: Object Types and Classes
 
-Three object types name the things the engine reads, their properties, and the collection that stores them.
+Five object types name the things the ontology talks about and their properties. Three are read by the engine and name the collection that stores them.
 
 ```js
 { _id: "Shipment", kind: "objectType", collection: "shipments", key: "shipmentId",
@@ -35,6 +35,10 @@ Three object types name the things the engine reads, their properties, and the c
                 temp: "number", powerKw: "number", doorOpen: "bool", humidityPct: "number" } }
 
 { _id: "Clause", kind: "objectType", collection: "clauses", key: "clauseId", properties: { ... } }
+
+{ _id: "Reefer",   kind: "objectType", key: "reeferId", properties: { reeferId: "string" } }
+{ _id: "Contract", kind: "objectType", key: ["contractId", "version"],
+  properties: { contractId: "string", version: "string" } }
 ```
 
 Only cargo needs a hierarchy:
@@ -57,6 +61,7 @@ cargo:seafood
 **Design choices**
 - `ancestors` is stored precomputed (MongoDB's *Array of Ancestors* tree pattern). Finding clauses for a cargo is one `$in` query, with no traversal. The hierarchy rarely changes, so the read path stays simple.
 - `shipments.cargoType` stores the class id itself (`cargo:live_fish`), so no mapping is needed.
+- `Reefer` and `Contract` have no collection of their own: a reefer exists as `reeferId` on shipments and readings, a contract as `contractId` + `version` on clauses. They are defined so that links can name them; nothing loads them.
 - An object type is read, not just described: `engine.load_object` takes `collection`, `key`, and `period` from it, so no code names the shipments collection or its date fields. `period` names the fields that bound the object's period; an empty end field means the period is still open (a shipment in transit ends now).
 
 ## 2. Links
@@ -68,9 +73,14 @@ No edge collection. Each link is an existing field; the ontology records what it
 | `assignedTo` | Reefer → Shipment | `shipments.reeferId` | lookup |
 | `governedBy` | Shipment → Contract | `shipments.contractRef` | lookup |
 | `hasClause` | Contract → Clause | `clauses.contractId` + `version` | lookup |
-| `appliesTo` | Clause → Cargo class | `clauses.appliesTo[]` | `$in` with ancestors |
-| `triggeredBy` | Clause → Event type | `clauses.trigger.eventType` | match |
+| `appliesTo` | Clause → `cargo:seafood` (any cargo class) | `clauses.appliesTo[]` | `$in` with ancestors |
+| `triggeredBy` | Clause → `eventType` (any event type) | `clauses.trigger.eventType` | match |
 | `references` | Clause → Clause | `clauses.references[]` | **`follow_references`** |
+
+A link end (`from`, `to`) is one of three things, and `catalog.py` rejects anything else:
+- an object type: `Shipment`, `Contract`;
+- a class root, meaning the root or any class below it: `cargo:seafood`;
+- a kind of ontology document, meaning any document of that kind: `eventType`.
 
 ```js
 { _id: "rel:governedBy", kind: "linkType", from: "Shipment", to: "Contract" }
@@ -209,6 +219,8 @@ A rule is a contract or SOP article rewritten in the ontology's vocabulary: an e
 Conditions combine with AND only. An article that cannot be expressed in this format stays text-only in `knowledge`; the LLM may cite it but the engine does not decide it.
 
 **Where rules come from.** In the MVP, by hand: read the article, express it with names from the ontology, run the catalog check, mark it approved. `catalog.py` rejects any rule that uses a name the ontology does not define, and any ontology entry whose function name is not registered.
+
+**`catalog.py` is the ontology's grammar checker.** It checks that every name a definition or rule uses is itself defined: link ends, `period` fields, `requiresFields`, `causes`, measures, classes, actions, parties, and registered function names. It reads only the JSON, not the database. A builder reuses it as is: when an LLM drafts a rule from a contract, the draft is checked here before a person approves it, so a plausible but undefined name never reaches the engine.
 
 ## 5. Execution: `engine.py`
 

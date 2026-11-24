@@ -140,11 +140,11 @@ The structured form of a clause. Detailed format and evaluation rules: [ontology
 
 ## ontology
 
-Definitions, not data. 32 documents of six kinds. Kept as a collection, not code constants, so the vocabulary lives next to the data it describes and tools and the LLM read the same definitions. Behaviour is never stored here: event, link, and action documents name a function, and `registry.py` maps the name to code.
+Definitions, not data. 34 documents of six kinds. Kept as a collection, not code constants, so the vocabulary lives next to the data it describes and tools and the LLM read the same definitions. Behaviour is never stored here: event, link, and action documents name a function, and `registry.py` maps the name to code.
 
 | `kind` | Count | Example |
 |---|---|---|
-| `objectType` | 3 | `Shipment`, `Reading`, `Clause` (properties and collection) |
+| `objectType` | 5 | `Shipment`, `Reading`, `Clause` (properties and collection); `Reefer`, `Contract` (no collection) |
 | `class` | 7 | `cargo:live_fish` with precomputed `ancestors` |
 | `linkType` | 6 | `rel:references` with `traverse: "follow_references"` |
 | `eventType` | 5 | `event:temperature_excursion` with `detector` and `measures` |

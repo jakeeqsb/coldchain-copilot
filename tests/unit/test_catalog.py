@@ -41,7 +41,7 @@ def test_real_catalog_has_no_problems(catalog: Catalog, chunk_ids: set[str]) -> 
 
 def test_real_catalog_sizes(catalog: Catalog, chunk_ids: set[str]) -> None:
     # Guards against a data file being emptied or truncated by mistake.
-    assert len(catalog.ontology) == 32
+    assert len(catalog.ontology) == 34
     assert len(catalog.clauses) == 15
     assert len(catalog.shipments) == 5
     assert len(catalog.cargo_specs) == 4
@@ -128,6 +128,18 @@ def _cause_not_an_event_type(c: Catalog) -> None:
     ontology_doc(c, "event:temperature_excursion")["causes"] = ["event:compressor_stop", "event:door_ajar"]
 
 
+def _link_to_unknown_type(c: Catalog) -> None:
+    ontology_doc(c, "rel:governedBy")["to"] = "Agreement"
+
+
+def _link_to_class_below_root(c: Catalog) -> None:
+    ontology_doc(c, "rel:appliesTo")["to"] = "cargo:live_fish"
+
+
+def _period_field_not_a_property(c: Catalog) -> None:
+    ontology_doc(c, "Shipment")["period"]["end"] = "arrivedAt"
+
+
 def _chained_clause_not_in_references(c: Catalog) -> None:
     clause(c, ART7)["references"] = []
 
@@ -141,6 +153,12 @@ BROKEN_CASES: list[tuple[str, Callable[[Catalog], None], list[str]]] = [
      ["rel:references: traverse cypher_references is not registered"]),
     ("required field not a property", _required_field_not_a_property,
      ["event:humidity_breach: required field humidity is not a property of Reading"]),
+    ("link to unknown type", _link_to_unknown_type,
+     ["rel:governedBy: to Agreement is not an object type, class root, or kind"]),
+    ("link to a class below the root", _link_to_class_below_root,
+     ["rel:appliesTo: to cargo:live_fish is not an object type, class root, or kind"]),
+    ("period field not a property", _period_field_not_a_property,
+     ["Shipment: period end arrivedAt is not a property of Shipment"]),
     ("cause not an event type", _cause_not_an_event_type,
      ["event:temperature_excursion: cause event:door_ajar is not an event type"]),
     ("chained clause not in references", _chained_clause_not_in_references,

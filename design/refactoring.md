@@ -249,11 +249,22 @@ detector alone no longer sets `cause`.
 
 ### Step 4. Stronger catalog checks
 
-- [ ] Define `Reefer` and `Contract` object types.
-- [ ] `catalog.py` checks that every link type's `from` and `to` is an object
+- [x] Define `Reefer` and `Contract` object types.
+- [x] `catalog.py` checks that every link type's `from` and `to` is an object
       type or a class root.
-- [ ] Note in `ontology.md`: `catalog.py` is the ontology's grammar checker;
+- [x] `catalog.py` checks that `period` names properties of the object type
+      (left from step 2).
+- [x] Note in `ontology.md`: `catalog.py` is the ontology's grammar checker;
       a builder reuses it to validate LLM-drafted rules.
+
+Result (2026-11-24). Run on the previous ontology, the new checks report
+five broken link ends: `Reefer` and `Contract` were never defined, and
+`CargoClass` and `EventType` named nothing. `Reefer` and `Contract` are now
+object types without a collection (nothing loads them). A link end may be an
+object type, a class root (`cargo:seafood`), or a kind of ontology document
+(`eventType`); `rel:appliesTo` and `rel:triggeredBy` now point to those.
+Engine results are unchanged. Left as is: property types such as
+`cargoType: "CargoClass"` are not checked; only link ends were in scope.
 
 ### Step 5. Agent on LangGraph practice, and briefing latency
 
@@ -410,6 +421,6 @@ equipment maintenance) should follow it in phase 1.
 | 1 | done | model providers |
 | 2 | done | objects through the ontology |
 | 3 | done | causes as data |
-| 4 | not started | catalog checks |
+| 4 | done | catalog checks |
 | 5 | not started | agent and latency; needs `.env` |
 | 6 | not started | documents |
