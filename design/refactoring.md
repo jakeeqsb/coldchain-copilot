@@ -291,10 +291,24 @@ a single prebuilt loop does not give.
                                             clause text via $lookup)
 ```
 
-- [ ] (B) `evaluate_obligations` joins `knowledge` by `chunkId` with
+- [x] (B) `evaluate_obligations` joins `knowledge` by `chunkId` with
       `$lookup` and returns each clause's heading and text, so `get_clause`
       is no longer needed to quote it.
-- [ ] (C) Drop fields the LLM does not use from the engine output.
+- [x] (C) Drop fields the LLM does not use from the engine output.
+
+Result 5.1 (2026-11-24). Every result carries `source`; triggered and
+unresolved results also carry `text` (13 of 42 across the five shipments).
+The gateway drops `actions`, which repeated the triggered results; the
+engine still produces them for handlers. The prompt says to quote that text
+and use `get_clause` only for other clauses. Three runs each, before → after:
+
+| Question | Time (s) | LLM calls | Input tokens | `get_clause` |
+|---|---|---|---|---|
+| FLEET-01 briefing | 38.0 / 33.6 / 31.9 → 27.6 / 26.2 / 25.4 | 4 → 3 | ~35k → ~18k | 6–11 → 0 |
+| SHP-102 notice duty | 12.0 / 9.6 / 10.0 → 8.1 / 8.4 / 8.4 | 3 → 2 | 11.7k → 6.3k | 1 → 0 |
+
+Citations changed from chunk ids (`[blueharbor-live-fish-v1-article-6]`) to
+document names (`[BlueHarbor 계약 제6조]`).
 - [ ] Briefing path: a `route` node (start simple: a CLI flag or a keyword
       rule; an LLM classifier only if needed) and a deterministic `collect`
       node that calls the gateway functions directly, then one `llm` call to

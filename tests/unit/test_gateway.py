@@ -116,3 +116,10 @@ def test_nested_lists_and_object_ids() -> None:
 
     assert out["results"][0]["_id"] == "65f000000000000000000000"
     assert out["results"][0]["event"]["startLocal"] == "2026-10-15 09:00 KST"
+
+def test_evaluate_obligations_drops_the_repeated_actions(monkeypatch) -> None:
+    report = {"shipmentId": "SHP-102", "results": [{"clauseId": "x"}], "actions": [{"clauseId": "x"}]}
+    monkeypatch.setattr(gateway.engine, "evaluate_shipment", lambda shipment_id: report)
+
+    assert gateway.call("evaluate_obligations", {"shipment_id": "SHP-102"}) == {
+        "shipmentId": "SHP-102", "results": [{"clauseId": "x"}]}

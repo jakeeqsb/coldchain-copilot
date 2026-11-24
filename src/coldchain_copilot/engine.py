@@ -14,6 +14,8 @@ functions ``registry.py`` maps them to. For one shipment it takes six steps:
    is tagged with the cause it overlaps (:func:`detect_events`). Also check
    whether the fields each event type requires were collected at all.
 4. Compare each clause's conditions with the detected measures (``rules.py``).
+   Each result gets the clause's ``source`` (and its ``text`` when the
+   answer will quote it), joined from ``knowledge`` in step 2.
 5. For each triggered clause, follow ``rel:references`` with the link type's
    ``traverse`` function to list the clauses that build on it.
 6. For each triggered clause, run its action type's ``handler`` to produce a
@@ -45,7 +47,8 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
 
     Returns:
         ``shipmentId``, ``contractRef``, ``period`` (``start``/``end``),
-        ``results`` (one per applicable clause, from ``rules.py``, each with a
+        ``results`` (one per applicable clause, from ``rules.py``, each with
+        ``source``, ``text`` when quoted (:func:`attach_sources`), and a
         ``follows`` list of dependent clause ids when triggered), and
         ``actions`` (one briefing item per triggered clause).
 
@@ -69,8 +72,9 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         for event_id in event_ids
     }
 
-    # 4. Compare conditions
+    # 4. Compare conditions, and attach each clause's source
     results = rules.evaluate_clauses(clauses, events_by_type, collected_by_type)
+    attach_sources(results, clauses)
 
     # 5. Follow references from triggered clauses
     traverse = registry.TRAVERSERS[defs[REFERENCES]["traverse"]]
@@ -92,6 +96,27 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         "results": results,
         "actions": actions,
     }
+
+
+QUOTED_STATUSES = frozenset({"triggered", "unresolved"})
+"""Statuses whose results carry the clause text, because the answer quotes them."""
+
+
+def attach_sources(results: list[Doc], clauses: list[Doc]) -> None:
+    """Sets ``source`` on every result, and ``text`` on those the answer quotes.
+
+    ``source`` names the document and article, for citing. ``text`` is added
+    only for ``triggered`` and ``unresolved`` results: those are the
+    obligations and open questions an answer quotes, while a not-triggered
+    clause is explained by its ``basis``. ``get_clause`` still returns any
+    clause's text on request.
+
+    Modifies ``results`` in place; results and clauses are in the same order.
+    """
+    for result, clause in zip(results, clauses, strict=True):
+        result["source"] = clause.get("source")
+        if result["status"] in QUOTED_STATUSES:
+            result["text"] = clause.get("text")
 
 
 def detect_events(event_ids: set[str], scope: Doc, start: datetime, end: datetime) -> dict[str, list[Doc]]:

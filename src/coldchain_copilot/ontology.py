@@ -75,11 +75,32 @@ def applicable_clauses(shipment: Doc) -> list[Doc]:
 
     Uses the ``(contractId, version)`` and ``appliesTo`` indexes created by the
     seed script, one per branch of the ``$or``.
+
+    Each clause also gets ``source`` (document and article name) and ``text``
+    (the article itself), joined from ``knowledge`` by ``chunkId`` with
+    ``$lookup``. The clause names its chunk exactly, so this is a key join,
+    not a search. Before ``scripts/ingest_docs.py`` has run, the two fields
+    are absent; deciding clauses does not need them.
     """
     query = applicable_clauses_filter(
         shipment["contractRef"], cargo_classes(shipment["cargoType"])
     )
-    return list(db.collection(db.CLAUSES).find(query, {"_id": 0}).sort("clauseId", 1))
+    pipeline = [
+        {"$match": query},
+        {"$sort": {"clauseId": 1}},
+        {
+            "$lookup": {
+                "from": db.KNOWLEDGE,
+                "localField": "chunkId",
+                "foreignField": "chunkId",
+                "pipeline": [{"$project": {"_id": 0, "source": 1, "text": 1}}],
+                "as": "chunk",
+            }
+        },
+        {"$set": {"source": {"$first": "$chunk.source"}, "text": {"$first": "$chunk.text"}}},
+        {"$project": {"_id": 0, "chunk": 0}},
+    ]
+    return list(db.collection(db.CLAUSES).aggregate(pipeline))
 
 
 def ontology_docs(ids: set[str]) -> dict[str, Doc]:

@@ -229,9 +229,9 @@ Conditions combine with AND only. An article that cannot be expressed in this fo
 | Step | What | Uses |
 |---|---|---|
 | 1. Object | Read the shipment and its period (start field → end field, or now while the end is empty) with `engine.load_object` | object type `Shipment`: `collection`, `key`, `period` |
-| 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors | classes, links, `ontology.applicable_clauses` |
+| 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors; each joined with its source text from `knowledge` (`$lookup` on `chunkId`) | classes, links, `ontology.applicable_clauses` |
 | 3. Detect | With `engine.detect_events`, run each event type's `detector` once, plus its `causes` when it has events, and attach causes; check `requiresFields` were collected | event types (`detector`, `causes`) → `registry.DETECTORS` |
-| 4. Compare | Compare each clause's conditions with the measures | rules + `rules.py` |
+| 4. Compare | Compare each clause's conditions with the measures; attach `source`, and `text` for triggered and unresolved results | rules + `rules.py`, `engine.attach_sources` |
 | 5. Follow | For each triggered clause, list clauses that reference it | link `references` → `registry.TRAVERSERS` |
 | 6. Act | For each triggered clause, run its action type's handler | action types → `registry.ACTIONS` |
 

@@ -79,8 +79,9 @@ How to work
 - Quote times from the ...Local fields (KST). Never convert time zones.
 - Cite documents, never tools. Cite every obligation, deadline, and
   recommendation with the source a tool returned (a chunk source or
-  chunkId). Never name a tool in the answer. Use get_clause to quote a
-  clause.
+  chunkId). Never name a tool in the answer. Quote the text that
+  evaluate_obligations returns; use get_clause only for a clause it did not
+  give the text of.
 - A clause with status "unresolved" means data is missing. Report it under
   Needs Confirmation with what is missing; never report it as "no obligation".
 - If a tool returns an error, read its message, fix the call, and retry once.

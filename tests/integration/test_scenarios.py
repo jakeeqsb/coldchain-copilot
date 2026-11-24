@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from coldchain_copilot import engine, registry
+from coldchain_copilot import db, engine, registry
 from coldchain_copilot.errors import ToolError
 from coldchain_copilot.tools import sensor
 
@@ -135,3 +135,13 @@ def test_evaluation_runs_each_detector_once(mongo_db, monkeypatch) -> None:
 
     assert {"detect_compressor_stop", "detect_door_opening", "detect_temperature_excursion"} <= set(calls)
     assert len(calls) == len(set(calls))
+
+
+def test_triggered_clause_carries_its_source_text(mongo_db) -> None:
+    if db.collection(db.KNOWLEDGE).estimated_document_count() == 0:
+        pytest.skip("knowledge is empty: run scripts/ingest_docs.py")
+    by_clause = {r["clauseId"]: r for r in engine.evaluate_shipment("SHP-102")["results"]}
+
+    art6, art8 = by_clause["blueharbor-live-fish-v1-art6"], by_clause["blueharbor-live-fish-v1-art8"]
+    assert art6["source"].endswith("§ Article 6") and "15 consecutive minutes" in art6["text"]
+    assert art8["status"] == "not_triggered" and art8["source"].endswith("§ Article 8") and "text" not in art8

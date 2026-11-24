@@ -31,7 +31,7 @@ Code layout:
 | `src/coldchain_copilot/tools/sensor.py` | The four sensor tools and the scope and window rules they share |
 | `src/coldchain_copilot/tools/adhoc.py` | `run_aggregation` and its guard |
 | `src/coldchain_copilot/tools/documents.py` | `search_knowledge`, `get_clause` (stage 4) |
-| `src/coldchain_copilot/tools/gateway.py` | LLM tool schemas, name → function dispatch (`evaluate_obligations` maps straight to `engine.evaluate_shipment`), error and date serialization |
+| `src/coldchain_copilot/tools/gateway.py` | LLM tool schemas, name → function dispatch (`evaluate_obligations` is `engine.evaluate_shipment` without `actions`), error and date serialization |
 
 ---
 
@@ -171,22 +171,19 @@ Contract chunks are filtered by `contractId` and `version` from the shipment. Wi
       deadline: "2026-10-15T01:12:00Z", deadlineLocal: "2026-10-15 10:12 KST",
       basis: [{ measure: "consecutiveMinutes", op: "gte", required: 15, actual: 24, met: true }],
       chunkId: "blueharbor-live-fish-v1-article-6",
+      source: "BlueHarbor Fisheries Live Fish Transport Contract § Article 6",   // $lookup on knowledge
+      text: "Article 6: Notification of Temperature Excursion\n\nIf the internal temperature ...",
       follows: ["blueharbor-live-fish-v1-art7"] },          // via follow_references ($graphLookup)
     { clauseId: "blueharbor-live-fish-v1-art7", status: "triggered",
       basis: [{ dependsOn: "blueharbor-live-fish-v1-art6" }], ... },
     { clauseId: "blueharbor-live-fish-v1-art8", status: "not_triggered",
-      basis: [{ measure: "cumulativeMinutes", op: "gte", required: 30, actual: 24, met: false }], ... }
-  ],
-  actions: [                                                  // one per triggered clause
-    { action: "notify", party: "shipper.qa",
-      deadline: "2026-10-15T01:12:00Z", deadlineLocal: "2026-10-15 10:12 KST",
-      clauseId: "blueharbor-live-fish-v1-art6", kind: "obligation",
-      evidence: "blueharbor-live-fish-v1-article-6", event: { ... } }, ...
+      basis: [{ measure: "cumulativeMinutes", op: "gte", required: 30, actual: 24, met: false }],
+      source: "... § Article 8", ... }                       // no text: not quoted
   ]
 }
 ```
 
-The tool is `engine.evaluate_shipment` itself, registered under this name; only serialization is added. Internally the engine runs the `detector` of every event type the selected clauses need, including door openings and compressor stops, so no extra LLM tool is needed for them. `status` is one of `triggered`, `not_triggered`, `unresolved`. For `unresolved`, `basis` names what is missing (`{ missingData: "event:humidity_breach" }` or `{ missingMeasure: "..." }`). Steps and rules: [ontology.md § 5](./ontology.md#5-execution-enginepy).
+The tool is `engine.evaluate_shipment` without its `actions` (the handlers' briefing items, which repeat the triggered results); only serialization is added. Every result has `source` for citing; `triggered` and `unresolved` results also have the clause `text`, so the answer quotes it without a `get_clause` call. Both are joined from `knowledge` by `chunkId` with `$lookup` when the clauses are selected: the clause names its chunk exactly, so this is a key join, not a vector search. Internally the engine runs the `detector` of every event type the selected clauses need, including door openings and compressor stops, so no extra LLM tool is needed for them. `status` is one of `triggered`, `not_triggered`, `unresolved`. For `unresolved`, `basis` names what is missing (`{ missingData: "event:humidity_breach" }` or `{ missingMeasure: "..." }`). Steps and rules: [ontology.md § 5](./ontology.md#5-execution-enginepy).
 
 ## Ad Hoc
 

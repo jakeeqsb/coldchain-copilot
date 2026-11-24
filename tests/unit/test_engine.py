@@ -5,7 +5,8 @@ The full evaluation runs in tests/integration/test_scenarios.py. Here:
 - the period rule: the object type names the start and end fields, and an
   empty end means the period is still open;
 - ``detect_events`` with stand-in detectors and ontology: each detector runs
-  once, and causes come from the event type's ``causes`` list.
+  once, and causes come from the event type's ``causes`` list;
+- ``attach_sources``: every result is citable, quoted ones carry the text.
 """
 
 from __future__ import annotations
@@ -97,3 +98,23 @@ def test_cause_detectors_are_skipped_without_events(detectors) -> None:
 
     assert engine.detect_events({EXCURSION}, {}, NOW, NOW) == {EXCURSION: []}
     assert calls == ["excursion"]
+
+
+# -------------------------------------------------------------- attach_sources
+
+
+def test_every_result_gets_its_source_and_quoted_ones_the_text() -> None:
+    clauses = [{"clauseId": c, "source": f"Contract § {c}", "text": f"text of {c}"} for c in ("a", "b", "c")]
+    results = [{"clauseId": "a", "status": "triggered"}, {"clauseId": "b", "status": "not_triggered"},
+               {"clauseId": "c", "status": "unresolved"}]
+
+    engine.attach_sources(results, clauses)
+
+    assert [r["source"] for r in results] == ["Contract § a", "Contract § b", "Contract § c"]
+    assert [r.get("text") for r in results] == ["text of a", None, "text of c"]
+
+
+def test_sources_are_none_before_the_documents_are_ingested() -> None:
+    results = [{"clauseId": "a", "status": "triggered"}]
+    engine.attach_sources(results, [{"clauseId": "a"}])
+    assert results == [{"clauseId": "a", "status": "triggered", "source": None, "text": None}]
