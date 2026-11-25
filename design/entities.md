@@ -1,6 +1,9 @@
 # Entities and Collections
 
-Six collections, in three groups.
+**Answers:** what each collection holds, field by field, and how documents are chunked.
+**Read first:** [architecture.md](./architecture.md) for how the entities relate.
+
+Six collections, in three groups, plus the agent's conversation state (`checkpoints`, `checkpoint_writes`, written by LangGraph's `MongoDBSaver`).
 
 | Group | Collection | Type | Role |
 |---|---|---|---|
@@ -11,12 +14,13 @@ Six collections, in three groups.
 | Knowledge | `clauses` | Regular | Contract and SOP clauses as structured rules |
 | Knowledge | `ontology` | Regular | Object types, cargo classes, links, event and action types (names only, no logic) |
 
-```text
-cargo_specs ──(setup only)──▶ shipments ──(policy copied)──▶ readings.meta
-                                 │
-                                 └── contractRef ──▶ clauses ──chunkId──▶ knowledge
-                                                        │
-                                                   ontology (types, classes, links, function names)
+```mermaid
+flowchart LR
+  cargo_specs -- "setup only" --> shipments
+  shipments -- "policy copied" --> readings["readings.meta"]
+  shipments -- contractRef --> clauses
+  clauses -- chunkId --> knowledge
+  ontology -.-|"types, classes, links, function names"| clauses
 ```
 
 `shipments` is the hub. Detection reads only `readings`. Contract assessment starts from `shipments.contractRef`.
@@ -98,11 +102,12 @@ Detection compares each reading with its own bounds, without joining `cargo_spec
   docType: "contract",                     // contract | sop | manual
   contractId: "blueharbor-live-fish",      // contracts only
   version: "v1",
-  appliesTo: ["cargo:live_fish"],          // ontology classes; SOPs may use a parent class
-  title: "BlueHarbor Fisheries Live Fish Transport Contract",
-  section: "Article 6: Notification Upon Temperature Excursion",
-  text: "If the internal temperature exceeds 4°C for at least 15 consecutive minutes ...",
-  embedding: [ ... ]
+  appliesTo: "cargo:live_fish",            // an ontology class; SOPs and manuals use cargo:seafood
+  source: "BlueHarbor Fisheries Live Fish Transport Contract § Article 6",
+  heading: "Article 6: Notification of Temperature Excursion",
+  text: "Article 6: Notification of Temperature Excursion\n\nIf the internal temperature exceeds 4°C ...",
+  embedding: [ ... ],                      // 1024 floats
+  embeddingModel: "voyage-4"
 }
 ```
 
@@ -110,6 +115,30 @@ Detection compares each reading with its own bounds, without joining `cargo_spec
 - One chunk per article or section, so a citation points to one clause.
 - No shipment IDs on chunks. Which contract applies is known only by `shipments.contractRef`, so one contract version can serve many shipments unchanged.
 - Vector Search index filter fields: `docType`, `contractId`, `version`, `appliesTo`.
+- `embeddingModel` records which model wrote the vectors. A search refuses to run when it differs from `EMBEDDING_MODEL`, because vectors from two models cannot be compared.
+
+### Chunking strategy
+
+`ingest.py` splits by document structure: every `## Article N:` or `## Section N:` heading starts a chunk, which runs to the next heading. There is no fixed-size splitting and no overlap.
+
+| Why one chunk per article | Consequence |
+|---|---|
+| An article is the unit the engine judges and the unit an answer cites | A clause names exactly one chunk (`clauses.chunkId`), and `catalog.chunk_id` builds that id for both seeding and ingestion |
+| The chunk id is a shared key | The engine joins clause text with `$lookup` on `chunkId`: exact, no search needed |
+| The documents are short (122 to 423 characters per chunk, 23 chunks) | Each chunk fits one embedding comfortably and reads as a whole |
+| Articles refer to each other ("an excursion under Article 6") | The reference is a link (`clauses.references`, followed with `$graphLookup`), not text repeated by overlapping chunks |
+
+<details>
+<summary>Where this strategy stops working, and what to do then</summary>
+
+| Situation | Problem | Approach |
+|---|---|---|
+| A very long article (pages, many paragraphs) | One embedding blurs several topics; quoting it whole is too long | Parent-child chunks: paragraphs are embedded and searched, the article stays the unit a clause points to |
+| Nested numbering (6.1, 6.1.2) | The heading pattern only matches `## Article N:` | Widen the pattern per document family, and keep the chunk id stable for the clause it backs |
+| Documents without headings (emails, scanned letters) | Nothing to split on | Fixed-size chunks with overlap as a fallback; such text can be cited but not backed by a clause |
+| Tables or schedules inside an article | Rows lose their header when embedded as plain text | Render each table with its header into the chunk text before embedding |
+
+</details>
 
 ## clauses
 
@@ -140,11 +169,11 @@ The structured form of a clause. Detailed format and evaluation rules: [ontology
 
 ## ontology
 
-Definitions, not data. 32 documents of six kinds. Kept as a collection, not code constants, so the vocabulary lives next to the data it describes and tools and the LLM read the same definitions. Behaviour is never stored here: event, link, and action documents name a function, and `registry.py` maps the name to code.
+Definitions, not data. 34 documents of six kinds. Kept as a collection, not code constants, so the vocabulary lives next to the data it describes and tools and the LLM read the same definitions. Behaviour is never stored here: event, link, and action documents name a function, and `registry.py` maps the name to code.
 
 | `kind` | Count | Example |
 |---|---|---|
-| `objectType` | 3 | `Shipment`, `Reading`, `Clause` (properties and collection) |
+| `objectType` | 5 | `Shipment`, `Reading`, `Clause` (properties and collection); `Reefer`, `Contract` (no collection) |
 | `class` | 7 | `cargo:live_fish` with precomputed `ancestors` |
 | `linkType` | 6 | `rel:references` with `traverse: "follow_references"` |
 | `eventType` | 5 | `event:temperature_excursion` with `detector` and `measures` |
@@ -157,6 +186,7 @@ Definitions, not data. 32 documents of six kinds. Kept as a collection, not code
 
 { _id: "event:temperature_excursion", kind: "eventType", on: "Reading",
   detector: "detect_temperature_excursion", requiresFields: ["temp"],
+  causes: ["event:compressor_stop", "event:door_opening"],
   measures: ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"] }
 
 { _id: "rel:references", kind: "linkType", from: "Clause", to: "Clause", traverse: "follow_references" }

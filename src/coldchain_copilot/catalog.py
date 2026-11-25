@@ -172,8 +172,13 @@ def find_catalog_problems(catalog: Catalog, chunk_ids: set[str]) -> list[str]:
     Ontology checks:
         * Every ``detector``, ``traverse``, and ``handler`` name is registered
           in ``registry.py``.
+        * A link type's ``from`` and ``to`` are each an object type, a class
+          root (a class without a parent, e.g. ``cargo:seafood``), or a kind
+          of ontology document (e.g. ``eventType``).
+        * An object type's ``period`` fields are properties of that type.
         * An event type's ``on`` is an object type, and its
           ``requiresFields`` are properties of that type.
+        * Every ``causes`` entry of an event type is an event type.
 
     Shipment checks:
         * Its contract version has at least one clause.
@@ -210,12 +215,28 @@ def find_catalog_problems(catalog: Catalog, chunk_ids: set[str]) -> list[str]:
             for field in ev["requiresFields"]:
                 if field not in obj["properties"]:
                     problems.append(f"{eid}: required field {field} is not a property of {ev['on']}")
+        for cause in ev.get("causes", []):
+            if cause not in event_types:
+                problems.append(f"{eid}: cause {cause} is not an event type")
     for aid, action in of_kind("actionType").items():
         if action["handler"] not in registry.ACTIONS:
             problems.append(f"{aid}: handler {action['handler']} is not registered")
     for lid, link in of_kind("linkType").items():
         if "traverse" in link and link["traverse"] not in registry.TRAVERSERS:
             problems.append(f"{lid}: traverse {link['traverse']} is not registered")
+
+    # ---- ontology: every name a definition uses is defined
+    object_types = of_kind("objectType")
+    class_roots = {i for i, d in of_kind("class").items() if d["parent"] is None}
+    kinds = {d["kind"] for d in catalog.ontology}
+    for lid, link in of_kind("linkType").items():
+        for end in ("from", "to"):
+            if link[end] not in object_types.keys() | class_roots | kinds:
+                problems.append(f"{lid}: {end} {link[end]} is not an object type, class root, or kind")
+    for oid, obj in object_types.items():
+        for end, field in obj.get("period", {}).items():
+            if field not in obj["properties"]:
+                problems.append(f"{oid}: period {end} {field} is not a property of {oid}")
 
     # ---- clauses: every name is in the ontology
     for clause in catalog.clauses:

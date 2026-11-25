@@ -11,19 +11,21 @@ classes. Without one, contracts are excluded altogether. This is the same rule
 ``ontology.applicable_clauses_filter`` applies to ``clauses``, expressed on
 the chunk fields ``ingest.py`` writes.
 
-Queries are embedded here with Voyage (``input_type="query"``), the same model
-that embedded the documents (``VOYAGE_EMBED_MODEL``).
+Queries are embedded here (``kind="query"``) with the embedder from
+``embeddings.py``. Stored vectors and query vectors are comparable only when
+they come from the same model, so a search first checks that ``knowledge``
+was embedded with ``EMBEDDING_MODEL``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import voyageai
 from pymongo.errors import OperationFailure
 
 from coldchain_copilot import db
 from coldchain_copilot.config import get_settings
+from coldchain_copilot.embeddings import Embed, get_embedder
 from coldchain_copilot.errors import ErrorCode, ToolError
 from coldchain_copilot.ingest import VECTOR_INDEX
 from coldchain_copilot.ontology import cargo_classes
@@ -57,7 +59,8 @@ def search_knowledge(query: str, shipment_id: str | None = None, doc_type: str |
     Raises:
         ToolError: ``SCOPE_REQUIRED`` for a contract search without a
             shipment; ``NOT_FOUND`` for an unknown shipment;
-            ``EVIDENCE_UNAVAILABLE`` when the index is missing or not ready.
+            ``EVIDENCE_UNAVAILABLE`` when the index is missing or not ready,
+            or ``knowledge`` was embedded with another model.
     """
     if doc_type == "contract" and not shipment_id:
         raise ToolError(ErrorCode.SCOPE_REQUIRED, "Contract search needs shipment_id, so only that contract is searched.")
@@ -69,7 +72,8 @@ def search_knowledge(query: str, shipment_id: str | None = None, doc_type: str |
         classes = cargo_classes(shipment["cargoType"])
 
     settings = get_settings()
-    vector = embed_query(query, api_key=settings.require_voyage_key(), model=settings.voyage_embed_model)
+    check_embedding_model(db.collection(db.KNOWLEDGE).distinct("embeddingModel"), settings.embedding_model)
+    vector = embed_query(query, get_embedder(settings))
     pipeline = search_pipeline(vector, knowledge_filter(contract_ref, classes, doc_type), k)
 
     try:
@@ -168,7 +172,28 @@ def search_pipeline(vector: list[float], filter_: Doc, k: int) -> list[Doc]:
     ]
 
 
-def embed_query(query: str, *, api_key: str, model: str, client: Any = None) -> list[float]:
-    """Embeds one question with Voyage (``input_type="query"``)."""
-    client = client or voyageai.Client(api_key=api_key)
-    return client.embed([query], model=model, input_type="query").embeddings[0]
+def embed_query(query: str, embed: Embed) -> list[float]:
+    """Embeds one question (``kind="query"``)."""
+    return embed([query], "query")[0]
+
+
+def check_embedding_model(stored: list[str], model: str) -> None:
+    """Refuses a search whose query model differs from the stored vectors' model.
+
+    Vectors from two models are not comparable: the search would run and
+    return confident-looking but meaningless matches. An empty ``stored``
+    (nothing ingested yet) passes; the search itself then reports it.
+
+    Args:
+        stored: Distinct ``embeddingModel`` values in ``knowledge``.
+        model: The configured ``EMBEDDING_MODEL``.
+
+    Raises:
+        ToolError: ``EVIDENCE_UNAVAILABLE`` when they differ.
+    """
+    if stored and stored != [model]:
+        raise ToolError(
+            ErrorCode.EVIDENCE_UNAVAILABLE,
+            f"knowledge was embedded with {', '.join(stored)} but EMBEDDING_MODEL is {model}. "
+            "Run scripts/ingest_docs.py again.",
+        )

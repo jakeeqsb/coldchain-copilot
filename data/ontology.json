@@ -1,7 +1,9 @@
 [
-  {"_id": "Shipment", "kind": "objectType", "collection": "shipments", "key": "shipmentId", "properties": {"shipmentId": "string", "fleetId": "string", "reeferId": "string", "shipperId": "string", "cargoType": "CargoClass", "contractRef": "Contract", "temperaturePolicy": "range", "departedAt": "time", "deliveredAt": "time"}},
+  {"_id": "Shipment", "kind": "objectType", "collection": "shipments", "key": "shipmentId", "period": {"start": "departedAt", "end": "deliveredAt"}, "properties": {"shipmentId": "string", "fleetId": "string", "reeferId": "string", "shipperId": "string", "cargoType": "CargoClass", "contractRef": "Contract", "temperaturePolicy": "range", "departedAt": "time", "deliveredAt": "time"}},
   {"_id": "Reading", "kind": "objectType", "collection": "readings", "timeSeries": true, "properties": {"ts": "time", "meta.shipmentId": "string", "meta.reeferId": "string", "meta.fleetId": "string", "meta.temperaturePolicy": "range", "temp": "number", "powerKw": "number", "doorOpen": "bool", "humidityPct": "number"}},
   {"_id": "Clause", "kind": "objectType", "collection": "clauses", "key": "clauseId", "properties": {"clauseId": "string", "contractId": "string", "version": "string", "appliesTo": "CargoClass", "trigger": "object", "action": "object", "deadline": "object", "references": "Clause", "chunkId": "string"}},
+  {"_id": "Reefer", "kind": "objectType", "key": "reeferId", "properties": {"reeferId": "string"}},
+  {"_id": "Contract", "kind": "objectType", "key": ["contractId", "version"], "properties": {"contractId": "string", "version": "string"}},
 
   {"_id": "cargo:seafood", "kind": "class", "parent": null, "ancestors": []},
   {"_id": "cargo:live_seafood", "kind": "class", "parent": "cargo:seafood", "ancestors": ["cargo:seafood"]},
@@ -14,11 +16,11 @@
   {"_id": "rel:assignedTo", "kind": "linkType", "from": "Reefer", "to": "Shipment"},
   {"_id": "rel:governedBy", "kind": "linkType", "from": "Shipment", "to": "Contract"},
   {"_id": "rel:hasClause", "kind": "linkType", "from": "Contract", "to": "Clause"},
-  {"_id": "rel:appliesTo", "kind": "linkType", "from": "Clause", "to": "CargoClass"},
-  {"_id": "rel:triggeredBy", "kind": "linkType", "from": "Clause", "to": "EventType"},
+  {"_id": "rel:appliesTo", "kind": "linkType", "from": "Clause", "to": "cargo:seafood"},
+  {"_id": "rel:triggeredBy", "kind": "linkType", "from": "Clause", "to": "eventType"},
   {"_id": "rel:references", "kind": "linkType", "from": "Clause", "to": "Clause", "traverse": "follow_references"},
 
-  {"_id": "event:temperature_excursion", "kind": "eventType", "on": "Reading", "detector": "detect_temperature_excursion", "requiresFields": ["temp"], "measures": ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"]},
+  {"_id": "event:temperature_excursion", "kind": "eventType", "on": "Reading", "detector": "detect_temperature_excursion", "requiresFields": ["temp"], "causes": ["event:compressor_stop", "event:door_opening"], "measures": ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"]},
   {"_id": "event:door_opening", "kind": "eventType", "on": "Reading", "detector": "detect_door_opening", "requiresFields": ["doorOpen"], "measures": ["doorOpenMinutes"]},
   {"_id": "event:compressor_stop", "kind": "eventType", "on": "Reading", "detector": "detect_compressor_stop", "requiresFields": ["powerKw"], "measures": ["stopMinutes"]},
   {"_id": "event:humidity_breach", "kind": "eventType", "on": "Reading", "detector": "detect_humidity_breach", "requiresFields": ["humidityPct"], "measures": ["humidityMinutes", "minHumidityPct"]},

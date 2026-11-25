@@ -196,31 +196,34 @@ The MVP keeps the ontology minimal: two class hierarchies (cargo, events), six r
 
 ## 4. Quick Start
 
-**Requirements:** [uv](https://docs.astral.sh/uv/), a MongoDB deployment with Vector Search, a Voyage AI API key (embeddings), an OpenAI API key (briefing LLM).
+**Requirements:** [uv](https://docs.astral.sh/uv/), MongoDB with Vector Search reachable at `MONGODB_URI`, and API keys for the embedding and chat model providers (by default Voyage AI and OpenAI).
 
 ```bash
 uv sync
-cp .env.example .env          # set MONGODB_URI, VOYAGE_API_KEY, OPENAI_API_KEY
+cp .env.example .env                 # set MONGODB_URI, VOYAGE_API_KEY, OPENAI_API_KEY
 
-uv run seed.py                # shipments, ontology, clauses, 72 h of readings
-uv run ingest_docs.py         # docs/ → chunks + embeddings → knowledge
-uv run chat.py "Brief me on today's data."
-uv run chat.py                # interactive mode
+uv run scripts/seed.py               # validate the catalog; load shipments, ontology, clauses, 72 h of readings
+uv run scripts/ingest_docs.py        # docs/ → one chunk per Article/Section → embeddings → knowledge + vector index
+uv run pytest                        # unit tests; integration tests run when MONGODB_URI is reachable
+uv run coldchain-copilot -q "Brief me on FLEET-01."
+uv run coldchain-copilot             # interactive mode
 ```
 
 | Variable | Example |
 |---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017` |
 | `DB_NAME` | `coldchain_copilot` |
+| `EMBEDDING_PROVIDER` | `voyage` (or `openai`); rerun `ingest_docs.py` after a change |
+| `EMBEDDING_MODEL` | `voyage-4` |
+| `LLM_MODEL` | `openai:gpt-6.1-terra` (`provider:model`, any model with tool calling) |
+| `LLM_REASONING_EFFORT` | `low` (optional; OpenAI models) |
 | `VOYAGE_API_KEY` | your Voyage AI key |
-| `VOYAGE_EMBED_MODEL` | `voyage-4` |
 | `OPENAI_API_KEY` | your OpenAI key |
-| `OPENAI_MODEL` | `gpt-5-mini` |
 | `MAX_WINDOW_HOURS` | `72` |
 | `DATA_DIR` | `data` |
 | `DOCS_DIR` | `docs` |
 
-Provisioning MongoDB and the API keys is up to you; the project only reads these variables.
+How MongoDB runs (Atlas, a local Atlas deployment, ...) is up to you; the project only reads these variables.
 
 ---
 
@@ -250,29 +253,57 @@ All companies, contracts, SOPs, and manuals are fictional demo material.
 
 ## 6. Project Structure
 
+The code is in four layers, and imports go downward only (`tests/unit/test_layers.py`):
+
+```text
+ common      →  engine     →  tools      →  agent
+ config         ontology      gateway       agent.py
+ db             detection     lookup        cli.py
+ errors         rules         sensor
+ embeddings     engine        documents
+                registry      adhoc
+                catalog
+                ingest
+```
+
 ```text
 coldchain-copilot/
 ├── data/                  Ontology, clauses, shipments, cargo defaults (JSON)
 ├── docs/                  Contracts, SOP, maintenance manual (RAG sources)
 ├── design/                Detailed design (see below)
 ├── scripts/
-│   └── seed.py            Validate the catalog, load it, simulate 72 h of readings
+│   ├── seed.py            Validate the catalog, load it, simulate 72 h of readings
+│   └── ingest_docs.py     Chunk and embed docs/ into knowledge, build the vector index
 ├── src/coldchain_copilot/
 │   ├── config.py · db.py · errors.py
+│   ├── embeddings.py      Embedding providers chosen by EMBEDDING_PROVIDER (the only embedding SDK imports)
 │   ├── catalog.py         Check every name used by clauses and the ontology
-│   ├── ontology.py        Cargo classes, applicable clauses, follow_references ($graphLookup)
+│   ├── ontology.py        Cargo classes, applicable clauses, dependent clauses ($graphLookup)
 │   ├── detection.py       Detector functions (MongoDB aggregation on readings)
 │   ├── rules.py           Compare clause conditions with detected measures
 │   ├── registry.py        Ontology function names → functions
 │   ├── engine.py          Evaluate one shipment: clauses → detect → compare → follow → act
-│   └── tools/             LLM tools (in progress)
-└── tests/                 unit/ (no database) · integration/ (local MongoDB)
+│   ├── ingest.py          Documents → one chunk per Article/Section → embeddings
+│   ├── tools/             The LLM's 10 tools; gateway.py is its only entrance
+│   │   ├── gateway.py     Tool schemas, dispatch, error and time serialization
+│   │   ├── lookup.py      get_shipment
+│   │   ├── sensor.py      find_excursions, find_energy_anomalies, get_fleet_overview, get_reefer_timeline
+│   │   ├── documents.py   search_knowledge ($vectorSearch), get_clause
+│   │   ├── briefing.py    evaluate_obligations, collect_fleet_briefing
+│   │   └── adhoc.py       run_aggregation (guarded)
+│   ├── agent.py           LangGraph agent (llm ⇄ tools, MongoDBSaver checkpoints)
+│   └── cli.py             Terminal chat: uv run coldchain-copilot
+└── tests/                 unit/ (no database) · integration/ (MongoDB with seed data)
 ```
 
-| Design document | Contents |
+Start with [`design/architecture.md`](./design/architecture.md), then [`design/walkthrough.md`](./design/walkthrough.md). The others are references.
+
+| Design document | Answers |
 |---|---|
-| [`design/entities.md`](./design/entities.md) | Collections, document schemas, seeded data |
+| [`design/architecture.md`](./design/architecture.md) | What is in the system, and how the parts work together |
+| [`design/walkthrough.md`](./design/walkthrough.md) | What happens, in order, when an operator asks a question |
+| [`design/entities.md`](./design/entities.md) | Collections, document schemas, chunking, seeded data |
 | [`design/ontology.md`](./design/ontology.md) | Classes, relations, measures, rule format, evaluation |
 | [`design/interfaces.md`](./design/interfaces.md) | Tools by level, parameters, return shapes, errors, briefing format |
-| [`design/decisions.md`](./design/decisions.md) | Key design decisions and when to revisit them |
-| [`design/scaling.md`](./design/scaling.md) | Shard-key and index candidates, what to measure before scaling |
+| [`design/decisions.md`](./design/decisions.md) | Key design decisions, engineering rules, and when to revisit them |
+| [`design/refactoring.md`](./design/refactoring.md) | Stage 6 refactoring plan (working document) |

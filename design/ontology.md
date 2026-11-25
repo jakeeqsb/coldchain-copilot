@@ -1,5 +1,8 @@
 # Ontology
 
+**Answers:** every ontology definition, the rule format, and the exact steps the engine takes.
+**Read first:** [architecture.md](./architecture.md) for where the ontology sits.
+
 The ontology defines **what things are, how they connect, and what can be done to them**. With it, the question "does Article 6 apply?" is answered by data and named functions, not by the LLM reading a sentence.
 
 It has three parts, plus rules written in its vocabulary, plus one registry in code:
@@ -22,10 +25,11 @@ Out of scope for the MVP: authoring tools. The ontology and clauses are hand-wri
 
 ## 1. What: Object Types and Classes
 
-Three object types name the things the engine reads, their properties, and the collection that stores them.
+Five object types name the things the ontology talks about and their properties. Three are read by the engine and name the collection that stores them.
 
 ```js
 { _id: "Shipment", kind: "objectType", collection: "shipments", key: "shipmentId",
+  period: { start: "departedAt", end: "deliveredAt" },
   properties: { cargoType: "CargoClass", contractRef: "Contract", temperaturePolicy: "range",
                 departedAt: "time", deliveredAt: "time", ... } }
 
@@ -34,6 +38,10 @@ Three object types name the things the engine reads, their properties, and the c
                 temp: "number", powerKw: "number", doorOpen: "bool", humidityPct: "number" } }
 
 { _id: "Clause", kind: "objectType", collection: "clauses", key: "clauseId", properties: { ... } }
+
+{ _id: "Reefer",   kind: "objectType", key: "reeferId", properties: { reeferId: "string" } }
+{ _id: "Contract", kind: "objectType", key: ["contractId", "version"],
+  properties: { contractId: "string", version: "string" } }
 ```
 
 Only cargo needs a hierarchy:
@@ -56,6 +64,8 @@ cargo:seafood
 **Design choices**
 - `ancestors` is stored precomputed (MongoDB's *Array of Ancestors* tree pattern). Finding clauses for a cargo is one `$in` query, with no traversal. The hierarchy rarely changes, so the read path stays simple.
 - `shipments.cargoType` stores the class id itself (`cargo:live_fish`), so no mapping is needed.
+- `Reefer` and `Contract` have no collection of their own: a reefer exists as `reeferId` on shipments and readings, a contract as `contractId` + `version` on clauses. They are defined so that links can name them; nothing loads them.
+- An object type is read, not just described: `engine.load_object` takes `collection`, `key`, and `period` from it, so no code names the shipments collection or its date fields. `period` names the fields that bound the object's period; an empty end field means the period is still open (a shipment in transit ends now).
 
 ## 2. Links
 
@@ -66,9 +76,14 @@ No edge collection. Each link is an existing field; the ontology records what it
 | `assignedTo` | Reefer → Shipment | `shipments.reeferId` | lookup |
 | `governedBy` | Shipment → Contract | `shipments.contractRef` | lookup |
 | `hasClause` | Contract → Clause | `clauses.contractId` + `version` | lookup |
-| `appliesTo` | Clause → Cargo class | `clauses.appliesTo[]` | `$in` with ancestors |
-| `triggeredBy` | Clause → Event type | `clauses.trigger.eventType` | match |
+| `appliesTo` | Clause → `cargo:seafood` (any cargo class) | `clauses.appliesTo[]` | `$in` with ancestors |
+| `triggeredBy` | Clause → `eventType` (any event type) | `clauses.trigger.eventType` | match |
 | `references` | Clause → Clause | `clauses.references[]` | **`follow_references`** |
+
+A link end (`from`, `to`) is one of three things, and `catalog.py` rejects anything else:
+- an object type: `Shipment`, `Contract`;
+- a class root, meaning the root or any class below it: `cargo:seafood`;
+- a kind of ontology document, meaning any document of that kind: `eventType`.
 
 ```js
 { _id: "rel:governedBy", kind: "linkType", from: "Shipment", to: "Contract" }
@@ -99,14 +114,17 @@ db.clauses.aggregate([
 
 ### Event types
 
-An event type says which object it is observed on, which function detects it, which fields must be collected for "no event" to be trusted, and which measures the detector returns.
+An event type says which object it is observed on, which function detects it, which fields must be collected for "no event" to be trusted, which measures the detector returns, and optionally which event types can cause it.
 
 ```js
 { _id: "event:temperature_excursion", kind: "eventType", on: "Reading",
   detector: "detect_temperature_excursion",
   requiresFields: ["temp"],
+  causes: ["event:compressor_stop", "event:door_opening"],
   measures: ["consecutiveMinutes", "cumulativeMinutes", "peakTemp", "lowestTemp", "direction", "cause"] }
 ```
+
+`causes` is a relation between event types, kept as data so it can be shown and edited. The order is the priority when two causes overlap one event. A detector knows nothing of causes: `engine.detect_events` runs each detector once, and for an event type with `causes` and at least one event, runs the cause detectors not yet run and sets the `cause` measure (`detection.attach_causes`). `catalog.py` rejects a `causes` entry that is not an event type.
 
 | Event type | Detector | Measures |
 |---|---|---|
@@ -128,7 +146,7 @@ Detectors live in `detection.py` and share one signature, `(scope, start, end) -
 | `consecutiveMinutes` | temperature_excursion | min | Length of one excursion: last − first out-of-range reading + 1 |
 | `cumulativeMinutes` | temperature_excursion | min | Sum of `consecutiveMinutes` over the shipment period (`departedAt` to `deliveredAt`, or now) |
 | `peakTemp` / `lowestTemp` | temperature_excursion | °C | Max / min temperature during the excursion |
-| `cause` | temperature_excursion | — | `cause:compressor_stop`, `cause:door_opening`, or `cause:unknown`, from overlapping events |
+| `cause` | temperature_excursion | — | `cause:compressor_stop`, `cause:door_opening`, or `cause:unknown`: the first type in `causes` with an event on the same shipment overlapping in time |
 | `doorOpenMinutes` | door_opening | min | Length of one continuous door-open run |
 | `stopMinutes` | compressor_stop | min | Length of one run with `powerKw < 0.1` |
 | `powerChangePct` | power_anomaly | % | Last 24 h average power vs. the preceding 48 h, as a percentage change |
@@ -205,16 +223,18 @@ Conditions combine with AND only. An article that cannot be expressed in this fo
 
 **Where rules come from.** In the MVP, by hand: read the article, express it with names from the ontology, run the catalog check, mark it approved. `catalog.py` rejects any rule that uses a name the ontology does not define, and any ontology entry whose function name is not registered.
 
+**`catalog.py` is the ontology's grammar checker.** It checks that every name a definition or rule uses is itself defined: link ends, `period` fields, `requiresFields`, `causes`, measures, classes, actions, parties, and registered function names. It reads only the JSON, not the database. A builder reuses it as is: when an LLM drafts a rule from a contract, the draft is checked here before a person approves it, so a plausible but undefined name never reaches the engine.
+
 ## 5. Execution: `engine.py`
 
 `engine.evaluate_shipment(shipment_id)` decides every applicable clause for one shipment in six steps.
 
 | Step | What | Uses |
 |---|---|---|
-| 1. Object | Read the shipment; period = `departedAt` → `deliveredAt` (or now) | object type `Shipment` |
-| 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors | classes, links, `ontology.applicable_clauses` |
-| 3. Detect | For each event type the clauses wait on, run its `detector`; check `requiresFields` were collected | event types → `registry.DETECTORS` |
-| 4. Compare | Compare each clause's conditions with the measures | rules + `rules.py` |
+| 1. Object | Read the shipment and its period (start field → end field, or now while the end is empty) with `engine.load_object` | object type `Shipment`: `collection`, `key`, `period` |
+| 2. Clauses | Approved clauses of its contract version, plus contract-free clauses whose `appliesTo` meets the cargo class or its ancestors; each joined with its source text from `knowledge` (`$lookup` on `chunkId`) | classes, links, `ontology.applicable_clauses` |
+| 3. Detect | With `engine.detect_events`, run each event type's `detector` once, plus its `causes` when it has events, and attach causes; check `requiresFields` were collected | event types (`detector`, `causes`) → `registry.DETECTORS` |
+| 4. Compare | Compare each clause's conditions with the measures; attach `source`, and `text` for triggered and unresolved results | rules + `rules.py`, `engine.attach_sources` |
 | 5. Follow | For each triggered clause, list clauses that reference it | link `references` → `registry.TRAVERSERS` |
 | 6. Act | For each triggered clause, run its action type's handler | action types → `registry.ACTIONS` |
 

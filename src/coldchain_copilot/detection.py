@@ -64,10 +64,13 @@ def detect_temperature_excursion(scope: Doc, start: datetime, end: datetime) -> 
     the comparison is a field-to-field ``$expr``. Measures: run length
     (``consecutiveMinutes``), the shipment's total (``cumulativeMinutes``),
     ``peakTemp``, ``lowestTemp``, ``direction`` of the first reading
-    (``above``/``below``), and ``cause``: a compressor stop or door opening
-    whose run overlaps the excursion, checked in that order.
+    (``above``/``below``).
+
+    The ``cause`` measure is not set here. The event type lists its
+    ``causes`` in the ontology, and ``engine.detect_events`` runs those
+    detectors once and sets it with :func:`attach_causes`.
     """
-    events = _run_events(
+    return _run_events(
         "event:temperature_excursion",
         scope,
         start,
@@ -82,15 +85,6 @@ def detect_temperature_excursion(scope: Doc, start: datetime, end: datetime) -> 
             "direction": {"$first": "$side"},
         },
     )
-    if events:
-        attach_causes(
-            events,
-            {
-                "event:compressor_stop": detect_compressor_stop(scope, start, end),
-                "event:door_opening": detect_door_opening(scope, start, end),
-            },
-        )
-    return events
 
 
 def detect_door_opening(scope: Doc, start: datetime, end: datetime) -> list[Doc]:
@@ -340,7 +334,8 @@ def attach_causes(events: list[Doc], candidates: dict[str, list[Doc]]) -> None:
 
     A candidate is a cause when it is on the same shipment and its time span
     overlaps the event's. Candidate types are tried in dict order, which is
-    the priority when two overlap. ``event:compressor_stop`` becomes
+    the priority when two overlap; the engine passes them in the order of the
+    event type's ``causes`` list. ``event:compressor_stop`` becomes
     ``cause:compressor_stop``; no overlap gives ``cause:unknown``.
 
     Modifies ``events`` in place.

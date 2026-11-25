@@ -3,7 +3,7 @@
 Three jobs, in one place so every tool behaves the same:
 
 1. ``SCHEMAS`` describes each tool to the LLM in the OpenAI function-calling
-   format, which ``ChatOpenAI.bind_tools`` accepts as is. The descriptions
+   format, which a LangChain chat model's ``bind_tools`` accepts as is. The descriptions
    are the LLM's instructions for when to use a tool, so they are written
    for the model, not for developers.
 2. :func:`call` maps a tool name to its function and runs it with the
@@ -17,7 +17,7 @@ Typical usage from the agent:
 
     from coldchain_copilot.tools import gateway
 
-    llm = ChatOpenAI(model=...).bind_tools(gateway.SCHEMAS)
+    llm = chat_model(settings).bind_tools(gateway.SCHEMAS)
     result = gateway.call("find_excursions", {"fleet_id": "FLEET-01"})
 
 Not to be confused with ``coldchain_copilot.registry``, which maps ontology
@@ -34,9 +34,8 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
-from coldchain_copilot import engine
 from coldchain_copilot.errors import ErrorCode, ToolError
-from coldchain_copilot.tools import adhoc, documents, lookup, sensor
+from coldchain_copilot.tools import adhoc, briefing, documents, lookup, sensor
 
 Doc = dict[str, Any]
 
@@ -49,6 +48,7 @@ LOCAL_KEYS = frozenset({"start", "end", "deadline"})
 
 # ------------------------------------------------------------------ functions
 
+
 FUNCTIONS: dict[str, Callable[..., Doc]] = {
     "get_shipment": lookup.get_shipment,
     "find_excursions": sensor.find_excursions,
@@ -57,10 +57,12 @@ FUNCTIONS: dict[str, Callable[..., Doc]] = {
     "get_reefer_timeline": sensor.get_reefer_timeline,
     "search_knowledge": documents.search_knowledge,
     "get_clause": documents.get_clause,
-    "evaluate_obligations": engine.evaluate_shipment,
+    "evaluate_obligations": briefing.evaluate_obligations,
+    "collect_fleet_briefing": briefing.collect_fleet_briefing,
     "run_aggregation": adhoc.run_aggregation,
 }
-"""Tool name → function. ``evaluate_obligations`` is the engine itself."""
+"""Tool name → function."""
+
 
 
 # -------------------------------------------------------------------- schemas
@@ -158,9 +160,9 @@ SCHEMAS: list[Doc] = [
     ),
     _tool(
         "get_clause",
-        "Exact text of one clause by clause_id (as named by evaluate_obligations) or one chunk by "
-        "chunk_id, plus the structured rule when there is one. Use it to quote the clause behind "
-        "an obligation instead of searching for it.",
+        "Exact text of one clause by clause_id or one chunk by chunk_id, plus the structured rule "
+        "when there is one. evaluate_obligations already gives the source of every result and the "
+        "text of triggered and unresolved ones; use this for any other clause.",
         {"clause_id": {"type": "string", "description": "e.g. blueharbor-live-fish-v1-art6"},
          "chunk_id": {"type": "string", "description": "e.g. blueharbor-live-fish-v1-article-6"}},
     ),
@@ -169,10 +171,20 @@ SCHEMAS: list[Doc] = [
         "Evaluate every contract clause, SOP, and manual section that applies to a shipment. Each "
         "result has status triggered, not_triggered, or unresolved (data missing: report it as "
         "needing confirmation, never as no obligation), the basis (measured value against the "
-        "required value), deadline, and the source chunkId. actions lists what must be done, by "
-        "whom, by when. Use this for any question about obligations, deadlines, or what to do.",
+        "required value), deadline, action and party, and its source (document and article) with "
+        "chunkId; triggered and unresolved results also have the clause text, for quoting. Use "
+        "this for any question about obligations, deadlines, or what to do.",
         {"shipment_id": _SCOPE["shipment_id"] | {"description": "Shipment id, e.g. SHP-102."}},
         ["shipment_id"],
+    ),
+    _tool(
+        "collect_fleet_briefing",
+        "Everything a briefing on a whole fleet needs, in one call: the fleet overview, "
+        "excursions, and energy anomalies over the last 24 hours, and for each shipment in the "
+        "fleet its details (cargo, policy range) and evaluate_obligations result. Use it for a "
+        "briefing, status report, or overview of a fleet instead of calling those tools one by one.",
+        {"fleet_id": _SCOPE["fleet_id"]},
+        ["fleet_id"],
     ),
     _tool(
         "run_aggregation",

@@ -18,36 +18,30 @@ Conversation state is saved by ``MongoDBSaver`` in the same database
 (``checkpoints``, ``checkpoint_writes``), keyed by ``thread_id``, so a
 follow-up question in the same thread sees the earlier tool results.
 
-Run it:
-
-    uv run coldchain-copilot                       # interactive, new thread
-    uv run coldchain-copilot --thread demo-1       # continue a thread
-    uv run coldchain-copilot -q "Brief me on FLEET-01"
-
-Each answer is followed by one stats line for that question: elapsed time
-split into model time and tool time, LLM calls, tokens, and the tools called
-(with how many came back as errors).
+Build it with :func:`build_agent` and send questions with :func:`ask`,
+which also measures what each question used (:func:`turn_stats`). The
+terminal front end is ``coldchain_copilot.cli``.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
-import uuid
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.runtime import Runtime
 
 from coldchain_copilot import db
-from coldchain_copilot.config import get_settings
+from coldchain_copilot.config import Settings, get_settings
 from coldchain_copilot.tools import gateway
 
 RECURSION_LIMIT = 30
@@ -55,6 +49,13 @@ RECURSION_LIMIT = 30
 
 TOOL_WORKERS = 8
 """Tool calls requested in one model turn run concurrently, up to this many."""
+
+KEEP_TOOL_RESULTS_FOR = 3
+"""The model sees tool results from this many most recent questions in full."""
+
+OMITTED = json.dumps({"omitted": "Result from an earlier question, left out to save space. "
+                                 "Call the tool again if you need it."})
+"""What the model sees instead of an older tool result."""
 
 SYSTEM_PROMPT = """\
 You are the cold-chain operations copilot for a reefer fleet carrying seafood.
@@ -64,14 +65,24 @@ contracts, SOPs, and maintenance manuals that apply to them.
 Current time: {now}.
 
 How to work
+- You are read-only. You cannot send, notify, schedule, or change anything,
+  and you never offer to. Say what must be done, by whom, and by when;
+  people act on it.
 - Get facts only from tools. Never state a number, time, deadline, or
   obligation that no tool returned.
 - For any question about what must be done, by whom, or by when, call
   evaluate_obligations for the shipment. It decides whether each clause is
   triggered; do not judge thresholds yourself.
+- Write "fact vs. condition" from the clause's basis: the actual value
+  against the required one, with the comparison (for example
+  "24 min ≥ 15 min" or "24 min < 30 min"). For a clause that follows from
+  another, name that clause. Do not restate a fact without its condition.
 - Quote times from the ...Local fields (KST). Never convert time zones.
-- Cite every obligation, deadline, and recommendation with the source a tool
-  returned (a chunk source or chunkId). Use get_clause to quote a clause.
+- Cite documents, never tools. Cite every obligation, deadline, and
+  recommendation with the source a tool returned (a chunk source or
+  chunkId). Never name a tool in the answer. Quote the text that
+  evaluate_obligations returns; use get_clause only for a clause it did not
+  give the text of.
 - A clause with status "unresolved" means data is missing. Report it under
   Needs Confirmation with what is missing; never report it as "no obligation".
 - If a tool returns an error, read its message, fix the call, and retry once.
@@ -100,25 +111,44 @@ For other questions, answer directly and briefly, with sources.
 # --------------------------------------------------------------------- graph
 
 
+@dataclass(frozen=True)
+class Context:
+    """Values one question runs with, passed in rather than read inside a node.
+
+    LangGraph hands this to every node as ``runtime.context`` (the graph's
+    ``context_schema``). It is not part of the saved conversation state.
+
+    Attributes:
+        now: The current time, timezone-aware. :func:`ask` sets it from the
+            clock; tests pass a fixed value so the prompt is the same on
+            every run. The prompt shows it in ``gateway.DISPLAY_TZ``, the
+            zone of every display string the tools return.
+    """
+
+    now: datetime
+
+
 def build_graph(model: Any, checkpointer: Any = None):
     """Builds and compiles the two-node agent graph.
 
     Args:
         model: A chat model with the gateway's tools already bound
-            (``ChatOpenAI(...).bind_tools(gateway.SCHEMAS)``). Tests pass a
+            (``chat_model(settings).bind_tools(gateway.SCHEMAS)``). Tests pass a
             stand-in with an ``invoke(messages)`` method.
         checkpointer: Where conversation state is saved; ``MongoDBSaver`` in
-            :func:`create_agent`, an in-memory saver in tests.
+            :func:`build_agent`, an in-memory saver in tests.
 
     Returns:
-        The compiled graph. Invoke it with ``{"messages": [...]}`` and a
-        config naming the ``thread_id``.
+        The compiled graph. Invoke it with ``{"messages": [...]}``, a config
+        naming the ``thread_id``, and ``context=Context(now=...)``. Without a
+        context the prompt uses the clock.
     """
 
-    def llm(state: MessagesState) -> dict:
-        now = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
-        prompt = SystemMessage(SYSTEM_PROMPT.format(now=now))
-        return {"messages": [model.invoke([prompt, *state["messages"]])]}
+    def llm(state: MessagesState, runtime: Runtime[Context]) -> dict:
+        now = runtime.context.now if runtime.context else datetime.now(timezone.utc)
+        shown = now.astimezone(gateway.DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
+        prompt = SystemMessage(SYSTEM_PROMPT.format(now=shown))
+        return {"messages": [model.invoke([prompt, *recent_tool_results(state["messages"])])]}
 
     def tools(state: MessagesState) -> dict:
         # Calls from one model turn are independent, so they run concurrently;
@@ -133,7 +163,7 @@ def build_graph(model: Any, checkpointer: Any = None):
             ]
         }
 
-    graph = StateGraph(MessagesState)
+    graph = StateGraph(MessagesState, context_schema=Context)
     graph.add_node("llm", llm)
     graph.add_node("tools", tools)
     graph.add_edge(START, "llm")
@@ -148,38 +178,108 @@ def next_step(state: MessagesState) -> str:
     return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
-def create_agent():
-    """Builds the agent with the configured OpenAI model and MongoDB checkpointer."""
+def recent_tool_results(messages: list[BaseMessage], keep: int = KEEP_TOOL_RESULTS_FOR) -> list[BaseMessage]:
+    """Returns the conversation with tool results before the last ``keep`` questions omitted.
+
+    The model reads the whole thread on every call, so without this a long
+    thread grows by every result it ever fetched (a fleet briefing is ~15k
+    tokens) until it no longer fits. Recent results stay, so follow-up
+    questions still answer from them without calling a tool again.
+
+    An omitted result keeps its message, with :data:`OMITTED` as content: the
+    model's tool call and its result must stay paired, or the provider
+    rejects the conversation. Questions and answers are kept in full. Only
+    what is sent to the model changes; the saved thread keeps everything.
+
+    Args:
+        messages: The thread, oldest first.
+        keep: How many of the most recent questions keep their results.
+    """
+    questions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    if len(questions) <= keep:
+        return messages
+    cutoff = questions[-keep]
+    return [
+        m.model_copy(update={"content": OMITTED}) if i < cutoff and isinstance(m, ToolMessage) else m
+        for i, m in enumerate(messages)
+    ]
+
+
+def chat_model(settings: Settings) -> Any:
+    """Builds the chat model named by ``LLM_MODEL`` (``provider:model``).
+
+    ``init_chat_model`` is LangChain's factory for every provider it
+    integrates, so changing the provider is a configuration change, not a
+    code change (rule F1). The provider's integration reads its own API key
+    from the environment (``OPENAI_API_KEY`` for ``openai:...``).
+
+    Options that only one provider understands are added for that provider:
+    newer OpenAI models take tool calls only through the Responses API, and
+    ``LLM_REASONING_EFFORT`` is OpenAI's ``reasoning.effort``.
+    """
+    options: dict[str, Any] = {}
+    if settings.llm_model.startswith("openai:"):
+        options["use_responses_api"] = True
+        if settings.llm_reasoning_effort:
+            options["reasoning"] = {"effort": settings.llm_reasoning_effort}
+    return init_chat_model(settings.llm_model, **options)
+
+
+def build_agent():
+    """Builds the agent with the configured chat model and MongoDB checkpointer."""
     settings = get_settings()
-    # Newer OpenAI models take tool calls only through the Responses API.
-    reasoning = {"effort": settings.openai_reasoning_effort} if settings.openai_reasoning_effort else None
-    model = ChatOpenAI(
-        model=settings.openai_model,
-        api_key=settings.require_openai_key(),
-        use_responses_api=True,
-        reasoning=reasoning,
-    )
     checkpointer = MongoDBSaver(db.get_client(), db_name=settings.db_name)
-    return build_graph(model.bind_tools(gateway.SCHEMAS), checkpointer)
+    return build_graph(chat_model(settings).bind_tools(gateway.SCHEMAS), checkpointer)
 
 
-def ask(agent: Any, question: str, thread_id: str) -> dict:
+def ask(
+    agent: Any,
+    question: str,
+    thread_id: str,
+    now: datetime | None = None,
+    on_token: Callable[[str], None] | None = None,
+) -> dict:
     """Sends one question in a thread and returns the answer with its stats.
 
     The thread's earlier messages are counted first, so the stats cover only
     what this question added, not the whole conversation. The graph is
-    streamed node by node so the time of each ``llm`` and ``tools`` step can
-    be added up separately.
+    streamed in two modes at once: ``updates`` (one event per finished node,
+    so the time of each ``llm`` and ``tools`` step can be added up
+    separately) and ``messages`` (the model's text as it is generated, passed
+    to ``on_token``).
+
+    Args:
+        agent: The compiled graph from :func:`build_agent` or :func:`build_graph`.
+        question: The user's question.
+        thread_id: Conversation to add the question to.
+        now: The current time for this question (:class:`Context`). Defaults
+            to the clock; tests pass a fixed value.
+        on_token: Called with each piece of text the ``llm`` node generates,
+            so a front end can show the answer while it is written. Reasoning
+            and tool calls are not passed.
 
     Returns:
-        ``{"answer": str, "stats": dict}``; see :func:`turn_stats`.
+        ``{"answer": str, "stats": dict}``; see :func:`turn_stats`. With
+        ``on_token``, the stats also have ``first_text_seconds``: how long
+        until the first text was passed on.
     """
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
     before = len(agent.get_state(config).values.get("messages", []))
 
     seconds = {"llm": 0.0, "tools": 0.0}
+    first_text: float | None = None
     started = last = time.perf_counter()
-    for update in agent.stream({"messages": [("user", question)]}, config, stream_mode="updates"):
+    context = Context(now=now or datetime.now(timezone.utc))
+    stream = agent.stream({"messages": [("user", question)]}, config, context=context, stream_mode=["updates", "messages"])
+    for mode, update in stream:
+        if mode == "messages":
+            token, metadata = update
+            # A streaming model sends AIMessageChunks; one that cannot stream
+            # sends its whole reply once, as an AIMessage (the chunk's base class).
+            if on_token and metadata.get("langgraph_node") == "llm" and isinstance(token, AIMessage) and token.text:
+                first_text = first_text or time.perf_counter() - started
+                on_token(token.text)
+            continue
         now = time.perf_counter()
         for node in update:
             seconds[node] = seconds.get(node, 0.0) + (now - last)
@@ -188,6 +288,8 @@ def ask(agent: Any, question: str, thread_id: str) -> dict:
     messages = agent.get_state(config).values["messages"]
     stats = turn_stats(messages[before:], last - started)
     stats["llm_seconds"], stats["tool_seconds"] = round(seconds["llm"], 1), round(seconds["tools"], 1)
+    if first_text is not None:
+        stats["first_text_seconds"] = round(first_text, 1)
     # .text joins the text blocks: newer models return content as a list of
     # blocks (reasoning, text, ...) rather than one string.
     return {"answer": messages[-1].text, "stats": stats}
@@ -217,50 +319,3 @@ def turn_stats(messages: list, elapsed: float) -> dict:
         "tools": dict(Counter(call["name"] for m in replies for call in m.tool_calls)),
         "tool_errors": sum(1 for m in results if '"error"' in m.content[:20]),
     }
-
-
-def format_stats(stats: dict) -> str:
-    """One line for the terminal.
-
-    For example ``12.4s (LLM 10.9s, tools 1.3s) · LLM 3 · tokens 8,213 in / 1,045 out · tools 6 ...``.
-    The time split appears only when :func:`ask` measured it.
-    """
-    tools = ", ".join(f"{name}×{count}" for name, count in sorted(stats["tools"].items())) or "none"
-    split = f" (LLM {stats['llm_seconds']}s, tools {stats['tool_seconds']}s)" if "llm_seconds" in stats else ""
-    return (
-        f"{stats['seconds']}s{split} · LLM {stats['llm_calls']} · "
-        f"tokens {stats['input_tokens']:,} in / {stats['output_tokens']:,} out · "
-        f"tools {sum(stats['tools'].values())} ({tools}) · errors {stats['tool_errors']}"
-    )
-
-
-# ----------------------------------------------------------------------- cli
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Command-line chat. Entry point of ``uv run coldchain-copilot``."""
-    parser = argparse.ArgumentParser(description="Cold-chain briefing copilot")
-    parser.add_argument("--thread", default=None, help="thread id to continue (default: a new one)")
-    parser.add_argument("-q", "--question", default=None, help="ask one question and exit")
-    args = parser.parse_args(argv)
-
-    agent = create_agent()
-    thread_id = args.thread or f"cli-{uuid.uuid4().hex[:8]}"
-
-    if args.question:
-        show(ask(agent, args.question, thread_id))
-        return
-
-    print(f"thread {thread_id}  (empty line to quit)")
-    while question := input("\n> ").strip():
-        show(ask(agent, question, thread_id))
-
-
-def show(result: dict) -> None:
-    """Prints an answer followed by its stats line."""
-    print("\n" + result["answer"])
-    print("\n── " + format_stats(result["stats"]))
-
-
-if __name__ == "__main__":
-    main()

@@ -6,8 +6,6 @@ tests/integration/test_documents_db.py.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from coldchain_copilot.errors import ToolError
@@ -98,21 +96,33 @@ def test_more_results_widen_candidates() -> None:
     assert search["$vectorSearch"]["numCandidates"] == 200
 
 
-# --- embed_query / get_clause --------------------------------------------------
+# --- embed_query / check_embedding_model / get_clause ------------------------
 
 
 def test_query_is_embedded_as_a_query() -> None:
     seen = {}
 
-    class FakeVoyage:
-        def embed(self, texts, model, input_type):
-            seen.update(texts=texts, model=model, input_type=input_type)
-            return SimpleNamespace(embeddings=[[0.5, 0.5]])
+    def fake_embed(texts, kind):
+        seen.update(texts=texts, kind=kind)
+        return [[0.5, 0.5]]
 
-    vector = documents.embed_query("who do we notify?", api_key="unused", model="voyage-4", client=FakeVoyage())
+    vector = documents.embed_query("who do we notify?", fake_embed)
 
     assert vector == [0.5, 0.5]
-    assert seen == {"texts": ["who do we notify?"], "model": "voyage-4", "input_type": "query"}
+    assert seen == {"texts": ["who do we notify?"], "kind": "query"}
+
+
+@pytest.mark.parametrize("stored", [["voyage-4"], []])
+def test_matching_or_empty_knowledge_allows_the_search(stored) -> None:
+    documents.check_embedding_model(stored, "voyage-4")
+
+
+@pytest.mark.parametrize("stored", [["voyage-3"], ["voyage-3", "voyage-4"]])
+def test_vectors_from_another_model_stop_the_search(stored) -> None:
+    with pytest.raises(ToolError) as exc:
+        documents.check_embedding_model(stored, "voyage-4")
+    assert exc.value.code == "EVIDENCE_UNAVAILABLE"
+    assert "ingest_docs.py" in exc.value.message
 
 
 def test_get_clause_needs_an_id() -> None:

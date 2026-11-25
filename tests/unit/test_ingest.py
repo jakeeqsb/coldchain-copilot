@@ -1,13 +1,12 @@
 """Unit tests for coldchain_copilot.ingest: chunking and embedding.
 
 No database and no API key: chunking reads the real ``docs/`` folder, and
-embedding uses a stand-in Voyage client.
+embedding uses a stand-in embedder.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -80,17 +79,16 @@ def test_text_before_the_first_heading_is_left_out(tmp_path: Path) -> None:
 def test_embed_chunks_sends_documents_once_and_keeps_order() -> None:
     calls = []
 
-    class FakeVoyage:
-        def embed(self, texts, model, input_type):
-            calls.append({"texts": texts, "model": model, "input_type": input_type})
-            return SimpleNamespace(embeddings=[[float(i)] * 3 for i in range(len(texts))])
+    def fake_embed(texts, kind):
+        calls.append({"texts": texts, "kind": kind})
+        return [[float(i)] * 3 for i in range(len(texts))]
 
     chunks = [{"chunkId": "a", "source": "Doc § 1", "text": "one"},
               {"chunkId": "b", "source": "Doc § 2", "text": "two"}]
-    embedded = embed_chunks(chunks, api_key="unused", model="voyage-4", client=FakeVoyage())
+    embedded = embed_chunks(chunks, embed=fake_embed, model="voyage-4")
 
     assert len(calls) == 1
-    assert calls[0]["input_type"] == "document"
+    assert calls[0]["kind"] == "document"
     assert calls[0]["texts"] == ["Doc § 1\none", "Doc § 2\ntwo"]
     assert [c["embedding"][0] for c in embedded] == [0.0, 1.0]
     assert embedded[0]["embeddingModel"] == "voyage-4"

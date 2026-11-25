@@ -12,10 +12,12 @@ dependencies = [
     "langgraph>=1.0",
     "langchain-openai>=1.0",
     "langgraph-checkpoint-mongodb>=0.5",
+    "langchain>=1.0",
+    "openai>=1.0",
 ]
  
 [project.scripts]
-coldchain-copilot = "coldchain_copilot.agent:main"
+coldchain-copilot = "coldchain_copilot.cli:main"
  
 [dependency-groups]
 dev = [

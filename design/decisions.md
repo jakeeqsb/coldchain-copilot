@@ -1,5 +1,8 @@
 # Design Decisions
 
+**Answers:** why the system is built this way, what each choice costs, and when to revisit it.
+**Read first:** [architecture.md](./architecture.md).
+
 ## 1. Embed the temperature policy in each reading
 
 Each reading carries its shipment's `minC`, `maxC`, and `policyVersion` in `meta`.
@@ -69,3 +72,39 @@ Sensor facts, shipment context, contract text, and rules live in one database.
 - **Time Series.** Buckets and column compression (delta, delta-of-delta, zstd) reduce storage, index size, and cache use. `meta` is a structured document, queried by subfield. Excursions are detected with `$setWindowFields` and `$shift` on the time series itself. Retention is `expireAfterSeconds`; sharding on `meta` fields is available later.
 - **Vector Search.** `$vectorSearch` filters by the `contractId` and `version` read from the shipment, so no metadata is copied into a separate store.
 - **Accepted limits.** Time Series collections are append-oriented and do not support Change Streams, Database Triggers, or schema validation. Readings are never edited and are validated at ingestion, so these limits do not block the MVP.
+## 7. Engineering rules
+
+The code grew feature by feature, and the same knowledge ended up in more than one place. These rules keep it in one place and keep the layers readable. The rule names (A1, B2, ...) are used in reviews and in `design/refactoring.md`.
+
+**The guiding rule (B3): when the code and the ontology both know a fact, the code reads it from the ontology.** The ontology is what a future ontology builder edits, so it has to be what the engine runs.
+
+| Rule | Statement | Checked by |
+|---|---|---|
+| **A1** | Layers are `common → engine → tools → agent`; a module imports only from its own layer or a lower one. | `tests/unit/test_layers.py` |
+| **A2** | One entrance per layer: the engine resolves ontology names through `registry.py`; the LLM reaches data only through `tools/gateway.py`. | `test_layers.py` (agent side) |
+| **B1** | Judgment logic (detection, thresholds, condition checks) lives only in the engine layer. Tools resolve scope, call, and shape results. | review |
+| **B2** | The ontology holds names only; every name resolves in `registry.py`. | `catalog.py` at seed time |
+| **B3** | A fact the ontology states is read from the ontology, not repeated in code. | review |
+| **C1** | A new file only for a new responsibility with its own name in the vocabulary: a layer, an ontology concept, an external dependency, or an entry point. Never split a file by size alone. | review |
+| **C2** | One name, one meaning. A name already used by the project or a library it builds on is not reused for something else. | review |
+| **D1** | Validate at boundaries only: `catalog.py` at seed time, tools at LLM input. Code between them trusts its inputs. | review |
+| **D2** | `ToolError` becomes an error dict only in `tools/gateway.py`. | review |
+| **D3** | UTC everywhere; KST display strings are made only in `tools/gateway.py`. | review |
+| **E1** | Pure logic gets unit tests (no database); functions that touch the database get integration tests. | review |
+| **F1** | External model providers (embeddings, chat model) are chosen by configuration, never by code; provider SDKs are imported only in their provider module (`embeddings.py` for embedding SDKs, `agent.py` for LangChain). | `test_layers.py` |
+| **F2** | MongoDB is the platform, not a pluggable backend: no storage abstraction over aggregation, `$graphLookup`, or `$vectorSearch`. The only swappable data behaviour is graph traversal, through the traverser registry (§ 4). | review |
+| **G1** | The agent is a LangGraph `StateGraph`. What can be computed is a deterministic node; the LLM chooses tools, judges open questions, and writes the answer. | review |
+
+Layer of each module:
+
+| Layer | Modules |
+|---|---|
+| common | `config`, `db`, `errors`, `embeddings` |
+| engine | `ontology`, `detection`, `rules`, `engine`, `registry`, `catalog`, `ingest` |
+| tools | `tools/*` |
+| agent | `agent`, `cli` |
+
+`ingest` is in the engine layer, not scripts-only: it defines the `knowledge` chunk shape and the vector index that `tools/documents.py` queries. A new module is added to the `LAYERS` table in `test_layers.py`, so its layer is always a deliberate choice.
+
+- **Why written down:** A rule an agent or a new contributor cannot see is not followed. Rules that a test can check are tested.
+- **Revisit when:** The kernel is split from the cold-chain domain into separate packages; the layers then gain a kernel/domain axis.

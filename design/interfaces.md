@@ -1,5 +1,8 @@
 # Interfaces
 
+**Answers:** what each of the ten tools takes and returns, and the rules they share.
+**Read first:** [architecture.md](./architecture.md); [walkthrough.md](./walkthrough.md) shows one tool call end to end.
+
 The LLM interacts with data only through these tools. Every tool is read-only.
 
 Tools are thin. They resolve scope and window, call the detector or engine that
@@ -13,15 +16,16 @@ job of the clauses, through `evaluate_obligations`.
 |---|---|---|---|
 | 1 · Lookup | `get_shipment` | Shipment, reefer, route, policy, contract | `shipments` find |
 | 2 · Sensor | `get_fleet_overview` | Per-shipment temperature, power, door summary | `readings` aggregation + `detect_temperature_excursion` |
-| 2 · Sensor | `find_excursions` | Out-of-range runs as events, with measures | `detect_temperature_excursion` |
+| 2 · Sensor | `find_excursions` | Out-of-range runs as events, with measures | `engine.detect_events` (`detect_temperature_excursion` + causes) |
 | 2 · Sensor | `find_energy_anomalies` | Power change vs. baseline, as a number | `detect_power_anomaly` |
 | 2 · Sensor | `get_reefer_timeline` | Time-bucketed temperature, power, door | `readings` aggregation (`$dateTrunc`) |
-| 3 · Documents | `search_knowledge` | Relevant chunks from contracts, SOPs, manuals | `$vectorSearch` (stage 4) |
-| 3 · Documents | `get_clause` | Exact clause text by `clauseId` or `chunkId` | `knowledge` find (stage 4) |
+| 3 · Documents | `search_knowledge` | Relevant chunks from contracts, SOPs, manuals | `$vectorSearch` |
+| 3 · Documents | `get_clause` | Exact clause text by `clauseId` or `chunkId` | `knowledge` find |
+| 4 · Briefing | `collect_fleet_briefing` | Everything a fleet briefing needs, in one call | the level 1, 2, and 5 tools, in a fixed order |
 | 5 · Ontology | `evaluate_obligations` | Status of every applicable clause for a shipment | `engine.evaluate_shipment` |
 | Ad hoc | `run_aggregation` | Numeric questions no fixed tool covers | Text-to-MQL, guarded |
 
-Level 4 (briefing) has no tool of its own. The agent combines levels 2, 3, and 5.
+Level 4 (briefing) gathers levels 1, 2, and 5 for one fleet in code, so the model asks once instead of in two rounds; it decides nothing itself.
 
 Code layout:
 
@@ -30,8 +34,9 @@ Code layout:
 | `src/coldchain_copilot/tools/lookup.py` | `get_shipment` |
 | `src/coldchain_copilot/tools/sensor.py` | The four sensor tools and the scope and window rules they share |
 | `src/coldchain_copilot/tools/adhoc.py` | `run_aggregation` and its guard |
-| `src/coldchain_copilot/tools/documents.py` | `search_knowledge`, `get_clause` (stage 4) |
-| `src/coldchain_copilot/tools/gateway.py` | LLM tool schemas, name → function dispatch (`evaluate_obligations` maps straight to `engine.evaluate_shipment`), error and date serialization |
+| `src/coldchain_copilot/tools/documents.py` | `search_knowledge`, `get_clause` |
+| `src/coldchain_copilot/tools/briefing.py` | `evaluate_obligations` (`engine.evaluate_shipment` without `actions`), `collect_fleet_briefing` |
+| `src/coldchain_copilot/tools/gateway.py` | LLM tool schemas, name → function dispatch, error and date serialization |
 
 ---
 
@@ -107,7 +112,7 @@ Returns the `shipments` document as stored. The active shipment of a reefer is t
 }
 ```
 
-The tool calls `detect_temperature_excursion` with the resolved scope and window and returns its events unchanged, except for dropping runs shorter than `min_minutes`. The events are exactly the ones the engine sees. Excursions are computed per shipment, never across shipments, using each reading's own policy snapshot, and detection uses no `$lookup`.
+The tool runs `event:temperature_excursion` through `engine.detect_events` with the resolved scope and window, so causes are attached from the event type's `causes` exactly as in the engine, and returns the events unchanged, except for dropping runs shorter than `min_minutes`. The events are exactly the ones the engine sees. Excursions are computed per shipment, never across shipments, using each reading's own policy snapshot, and detection uses no `$lookup`.
 
 Cargo and the policy range are not repeated on each event: they are on the shipment, and the LLM gets them from `get_shipment`.
 
@@ -129,7 +134,7 @@ The tool reports the number only. It does not label a change as an anomaly: the 
 
 `reefer_id` (required), `hours` or `start` / `end`, `bucket_minutes` (default 5, raised automatically to keep at most 96 buckets). Per bucket: average, min, max temperature; average and min power; door open.
 
-## Level 3 · Documents (stage 4)
+## Level 3 · Documents
 
 ### `search_knowledge`
 
@@ -153,6 +158,29 @@ Contract chunks are filtered by `contractId` and `version` from the shipment. Wi
 
 `clause_id` or `chunk_id`. Returns the exact chunk text and, if structured, the clause rule. Used when semantic search might miss a clause the evaluator already identified.
 
+## Level 4 · Briefing
+
+### `collect_fleet_briefing`
+
+| Param | Type | Notes |
+|---|---|---|
+| `fleet_id` | string | required |
+
+```js
+{
+  fleetId: "FLEET-01",
+  overview:   { ... },   // get_fleet_overview, last 24 hours
+  excursions: { ... },   // find_excursions, last 24 hours
+  energy:     { ... },   // find_energy_anomalies
+  shipments: [           // one per shipment in the overview
+    { shipment: { ... },       // get_shipment
+      obligations: { ... } }   // evaluate_obligations
+  ]
+}
+```
+
+The same calls the model used to make for a briefing, in two rounds (fleet tools, then one call per shipment), made in code in one. It returns those tools' results unchanged and adds nothing of its own. The model still decides that a briefing was asked for, by choosing this tool.
+
 ## Level 5 · Ontology
 
 ### `evaluate_obligations`
@@ -171,22 +199,19 @@ Contract chunks are filtered by `contractId` and `version` from the shipment. Wi
       deadline: "2026-10-15T01:12:00Z", deadlineLocal: "2026-10-15 10:12 KST",
       basis: [{ measure: "consecutiveMinutes", op: "gte", required: 15, actual: 24, met: true }],
       chunkId: "blueharbor-live-fish-v1-article-6",
+      source: "BlueHarbor Fisheries Live Fish Transport Contract § Article 6",   // $lookup on knowledge
+      text: "Article 6: Notification of Temperature Excursion\n\nIf the internal temperature ...",
       follows: ["blueharbor-live-fish-v1-art7"] },          // via follow_references ($graphLookup)
     { clauseId: "blueharbor-live-fish-v1-art7", status: "triggered",
       basis: [{ dependsOn: "blueharbor-live-fish-v1-art6" }], ... },
     { clauseId: "blueharbor-live-fish-v1-art8", status: "not_triggered",
-      basis: [{ measure: "cumulativeMinutes", op: "gte", required: 30, actual: 24, met: false }], ... }
-  ],
-  actions: [                                                  // one per triggered clause
-    { action: "notify", party: "shipper.qa",
-      deadline: "2026-10-15T01:12:00Z", deadlineLocal: "2026-10-15 10:12 KST",
-      clauseId: "blueharbor-live-fish-v1-art6", kind: "obligation",
-      evidence: "blueharbor-live-fish-v1-article-6", event: { ... } }, ...
+      basis: [{ measure: "cumulativeMinutes", op: "gte", required: 30, actual: 24, met: false }],
+      source: "... § Article 8", ... }                       // no text: not quoted
   ]
 }
 ```
 
-The tool is `engine.evaluate_shipment` itself, registered under this name; only serialization is added. Internally the engine runs the `detector` of every event type the selected clauses need, including door openings and compressor stops, so no extra LLM tool is needed for them. `status` is one of `triggered`, `not_triggered`, `unresolved`. For `unresolved`, `basis` names what is missing (`{ missingData: "event:humidity_breach" }` or `{ missingMeasure: "..." }`). Steps and rules: [ontology.md § 5](./ontology.md#5-execution-enginepy).
+The tool is `engine.evaluate_shipment` without its `actions` (the handlers' briefing items, which repeat the triggered results); only serialization is added. Every result has `source` for citing; `triggered` and `unresolved` results also have the clause `text`, so the answer quotes it without a `get_clause` call. Both are joined from `knowledge` by `chunkId` with `$lookup` when the clauses are selected: the clause names its chunk exactly, so this is a key join, not a vector search. Internally the engine runs the `detector` of every event type the selected clauses need, including door openings and compressor stops, so no extra LLM tool is needed for them. `status` is one of `triggered`, `not_triggered`, `unresolved`. For `unresolved`, `basis` names what is missing (`{ missingData: "event:humidity_breach" }` or `{ missingMeasure: "..." }`). Steps and rules: [ontology.md § 5](./ontology.md#5-execution-enginepy).
 
 ## Ad Hoc
 

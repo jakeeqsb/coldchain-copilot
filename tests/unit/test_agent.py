@@ -9,11 +9,13 @@ graph stops when the model answers.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from coldchain_copilot import agent
+from coldchain_copilot.config import Settings
 from coldchain_copilot.tools import gateway
 
 
@@ -93,7 +95,8 @@ def test_same_thread_keeps_history() -> None:
 
 def test_system_prompt_states_the_rules_that_tools_rely_on() -> None:
     prompt = agent.SYSTEM_PROMPT
-    for rule in ("evaluate_obligations", "Local", "unresolved", "Needs Confirmation", "Never convert time zones"):
+    for rule in ("evaluate_obligations", "Local", "unresolved", "Needs Confirmation", "Never convert time zones",
+                 "read-only", "basis", "Never name a tool"):
         assert rule in prompt
 
 
@@ -128,14 +131,6 @@ def test_answer_is_text_even_when_content_is_blocks() -> None:
     assert agent.ask(graph, "brief", "t7")["answer"] == "Briefing."
 
 
-def test_stats_line() -> None:
-    line = agent.format_stats({"seconds": 12.4, "llm_seconds": 10.9, "tool_seconds": 1.3, "llm_calls": 3,
-                               "input_tokens": 8213, "output_tokens": 1045,
-                               "tools": {"find_excursions": 1, "evaluate_obligations": 5}, "tool_errors": 0})
-    assert line == ("12.4s (LLM 10.9s, tools 1.3s) · LLM 3 · tokens 8,213 in / 1,045 out · "
-                    "tools 6 (evaluate_obligations×5, find_excursions×1) · errors 0")
-
-
 def test_tool_calls_in_one_turn_run_concurrently(monkeypatch) -> None:
     import threading
     import time as clock
@@ -161,3 +156,65 @@ def test_tool_calls_in_one_turn_run_concurrently(monkeypatch) -> None:
     assert peak[0] > 1
     results = [json.loads(m.content)["ok"] for m in state["messages"] if isinstance(m, ToolMessage)]
     assert results == [0, 1, 2, 3]  # call order is kept
+
+
+def test_chat_model_comes_from_llm_model_with_openai_options(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(agent, "init_chat_model", lambda model, **options: seen.append((model, options)))
+
+    agent.chat_model(Settings(mongodb_uri="x", llm_model="openai:gpt-6.1-terra", llm_reasoning_effort="low"))
+    agent.chat_model(Settings(mongodb_uri="x", llm_model="anthropic:claude-sonnet-5-5", llm_reasoning_effort="low"))
+
+    assert seen == [
+        ("openai:gpt-6.1-terra", {"use_responses_api": True, "reasoning": {"effort": "low"}}),
+        ("anthropic:claude-sonnet-5-5", {}),  # OpenAI-only options are not sent to other providers
+    ]
+
+
+def test_prompt_time_comes_from_the_context_in_the_display_zone() -> None:
+    model = ScriptedModel(AIMessage("First."), AIMessage("Second."))
+    graph = agent.build_graph(model, InMemorySaver())
+
+    agent.ask(graph, "one", "t8", now=datetime(2026, 10, 15, 3, 0, tzinfo=timezone.utc))
+    graph.invoke({"messages": [("user", "two")]}, config("t8"),
+                 context=agent.Context(now=datetime(2026, 10, 15, 15, 30, tzinfo=timezone.utc)))
+
+    assert "Current time: 2026-10-15 12:00 KST." in model.seen[0][0].content
+    assert "Current time: 2026-10-16 00:30 KST." in model.seen[1][0].content  # crosses midnight in KST
+
+
+def test_on_token_gets_the_answer_text_but_not_tool_results(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"secret": "tool output"})
+    model = ScriptedModel(AIMessage("", tool_calls=[tool_call("get_shipment", {}, "c1")]), AIMessage("Briefing."))
+    graph = agent.build_graph(model, InMemorySaver())
+    tokens: list[str] = []
+
+    result = agent.ask(graph, "brief", "t9", on_token=tokens.append)
+
+    assert "".join(tokens) == result["answer"] == "Briefing."
+    assert result["stats"]["first_text_seconds"] >= 0
+
+
+def test_tool_results_of_older_questions_are_omitted_for_the_model(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"result": args["q"]})
+    replies = []
+    for q in range(4):
+        replies += [AIMessage("", tool_calls=[tool_call("get_shipment", {"q": q}, f"c{q}")]), AIMessage(f"Answer {q}.")]
+    model = ScriptedModel(*replies)
+    graph = agent.build_graph(model, InMemorySaver())
+
+    for q in range(4):
+        agent.ask(graph, f"question {q}", "t10")
+
+    sent = [m for m in model.seen[-1] if isinstance(m, ToolMessage)]  # the last call, for question 3
+    assert [m.content for m in sent] == [agent.OMITTED, '{"result": 1}', '{"result": 2}', '{"result": 3}']
+    assert [m.tool_call_id for m in sent] == ["c0", "c1", "c2", "c3"]  # still paired with their calls
+    assert "Answer 0." in [m.content for m in model.seen[-1]]  # answers are kept
+    saved = [m for m in graph.get_state(config("t10")).values["messages"] if isinstance(m, ToolMessage)]
+    assert saved[0].content == '{"result": 0}'  # the saved thread is unchanged
+
+
+def test_short_threads_are_sent_unchanged() -> None:
+    messages = [HumanMessage("q"), AIMessage("", tool_calls=[tool_call("x", {}, "c")]),
+                ToolMessage("{}", tool_call_id="c")]
+    assert agent.recent_tool_results(messages) is messages
