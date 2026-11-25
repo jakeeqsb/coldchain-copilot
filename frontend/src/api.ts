@@ -1,7 +1,7 @@
 // Calls to the backend API. The Vite dev server proxies /api to FastAPI.
 
 import type { Language } from "./i18n";
-import type { AskEvent, Fleet, Obligations, Series, Shipment } from "./types";
+import type { AskEvent, EntityGraph, Fleet, Obligations, SchemaGraph, Series, Shipment } from "./types";
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(path);
@@ -17,6 +17,8 @@ export const api = {
   shipment: (shipmentId: string) => get<Shipment>(`/api/shipments/${shipmentId}`),
   series: (shipmentId: string) => get<Series>(`/api/shipments/${shipmentId}/series`),
   obligations: (shipmentId: string) => get<Obligations>(`/api/shipments/${shipmentId}/obligations`),
+  schema: () => get<SchemaGraph>("/api/ontology/schema"),
+  entities: () => get<EntityGraph>("/api/ontology/graph"),
 };
 
 /**

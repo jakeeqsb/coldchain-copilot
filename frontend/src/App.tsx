@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from "react";
 
+import Architecture from "./architecture/Architecture";
+import type { LastRun } from "./architecture/content";
 import { type Language, saveLanguage, savedLanguage, text } from "./i18n";
+import Ontology from "./ontology/Ontology";
 import Operations from "./operations/Operations";
+import WhyMongo from "./why/WhyMongo";
 
 const TABS = ["operations", "ontology", "architecture", "why"] as const;
 type Tab = (typeof TABS)[number];
@@ -11,6 +15,10 @@ type Tab = (typeof TABS)[number];
 export default function App() {
   const [tab, setTab] = useState<Tab>("operations");
   const [language, setLanguage] = useState<Language>(savedLanguage);
+  const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  // Operations and Ontology stay mounted once opened, so the chat and the
+  // graph layout survive a tab switch. Architecture reopens on the last question.
+  const [opened, setOpened] = useState<Set<Tab>>(new Set(["operations"]));
   const t = text(language);
 
   useEffect(() => {
@@ -29,7 +37,7 @@ export default function App() {
         </div>
         <nav className="tabs" role="tablist">
           {TABS.map((id) => (
-            <button key={id} type="button" role="tab" className="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
+            <button key={id} type="button" role="tab" className="tab" aria-selected={tab === id} onClick={() => { setTab(id); setOpened((all) => new Set(all).add(id)); }}>
               {t.tabs[id]}
             </button>
           ))}
@@ -48,13 +56,16 @@ export default function App() {
             <h1>{title}</h1>
             <p>{description}</p>
           </div>
-          {tab === "operations" ? (
-            <Operations t={t} language={language} />
-          ) : (
-            <div className="panel">
-              <div className="panel-b empty">{t.comingSoon}</div>
+          <div hidden={tab !== "operations"}>
+            <Operations t={t} language={language} onRun={setLastRun} />
+          </div>
+          {opened.has("ontology") && (
+            <div hidden={tab !== "ontology"}>
+              <Ontology t={t} />
             </div>
           )}
+          {tab === "architecture" && <Architecture language={language} lastRun={lastRun} />}
+          {tab === "why" && <WhyMongo language={language} />}
         </section>
       </main>
     </>

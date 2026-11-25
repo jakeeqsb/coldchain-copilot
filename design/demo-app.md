@@ -118,7 +118,7 @@ language to answer in.
 |---|---|---|---|
 | 1 | Plan, backend, tests | done | ① |
 | 2–3 | Frontend shell, Operations tab | done | ② |
-| 4 | Ontology, Architecture, Why MongoDB tabs | not started | ③ |
+| 4 | Ontology, Architecture, Why MongoDB tabs | done | ③ |
 | 5 | UI fixes | not started | ④ |
 
 ### Day 1 · Backend
@@ -143,9 +143,10 @@ language to answer in.
 
 ### Day 4 · Other tabs
 
-- [ ] Ontology: schema graph, drill-down entity graph, filters, relation table
-- [ ] Architecture: flows lit from the trace
-- [ ] Why MongoDB: feature cards
+- [x] Ontology: schema graph, drill-down entity graph, filters, relation table
+- [x] Architecture: flows lit from the trace ("last question" lights the path the last answer took)
+- [x] Why MongoDB: feature cards, each pipeline checked against the code
+- [x] Operations and Ontology stay mounted across tab switches, so the chat survives
 
 ### Day 5 · Fixes
 

@@ -129,3 +129,11 @@ export type AskEvent =
   | { event: "error"; data: { message: string } };
 
 export type Chunk = { chunkId: string; docType: string; source: string; heading: string; text: string; score?: number };
+
+export type SchemaNode = { id: string; kind: string; count: number; definition: Record<string, unknown> };
+export type SchemaEdge = { from: string; to: string; name: string; field: string | null; linkType: string | null };
+export type SchemaGraph = { nodes: SchemaNode[]; edges: SchemaEdge[] };
+
+export type EntityNode = { id: string; type: string; label: string; data: Record<string, any> };
+export type EntityEdge = { from: string; to: string; name: string };
+export type EntityGraph = { nodes: EntityNode[]; edges: EntityEdge[] };

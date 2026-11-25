@@ -139,7 +139,7 @@ function DeadlineTimeline({ results, t }: { results: ClauseResult[]; t: Text }) 
           <g key={r.clauseId}>
             <text x={L - 8} y={y + 4} textAnchor="end" className="b">{sourceParts(r)[0]}</text>
             <line className="rail" x1={L} x2={W - R} y1={y} y2={y} />
-            <line className={end < now ? "seg" : "seg open"} x1={x(start)} x2={x(end)} y1={y} y2={y} />
+            <line className={end < now ? "span" : "span open"} x1={x(start)} x2={x(end)} y1={y} y2={y} />
             <text x={x(end) + 6} y={y + 4} className={end < now ? "r" : undefined}>{kstTime(end)}</text>
           </g>
         );

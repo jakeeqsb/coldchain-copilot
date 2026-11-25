@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
+import type { LastRun } from "../architecture/content";
 import type { Language, Text } from "../i18n";
 import type { ClauseResult, FleetRow, Obligations, Series, Shipment } from "../types";
 import Chat from "./Chat";
@@ -25,7 +26,7 @@ export function verdict(results: ClauseResult[]): { kind: Verdict; count: number
 
 export const CHIP: Record<Verdict, string> = { triggered: "t", unresolved: "u", ok: "ok" };
 
-export default function Operations({ t, language }: { t: Text; language: Language }) {
+export default function Operations({ t, language, onRun }: { t: Text; language: Language; onRun: (run: LastRun) => void }) {
   const [cards, setCards] = useState<ShipmentCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -107,7 +108,7 @@ export default function Operations({ t, language }: { t: Text; language: Languag
         </section>
       )}
       </div>
-      <Chat t={t} language={language} series={series}
+      <Chat t={t} language={language} series={series} onRun={onRun}
             shipmentOfReefer={Object.fromEntries((cards ?? []).map((c) => [c.row.reeferId, c.row.shipmentId]))} />
       </div>
     </div>

@@ -4,6 +4,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { ask } from "../api";
+import type { LastRun } from "../architecture/content";
 import type { Language, Text } from "../i18n";
 import type { Series, Stats, TraceStep } from "../types";
 import { chooseWidgets } from "./answerCharts";
@@ -25,11 +26,12 @@ function newThreadId(): string {
   return `web-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export default function Chat({ t, language, series, shipmentOfReefer }: {
+export default function Chat({ t, language, series, shipmentOfReefer, onRun }: {
   t: Text;
   language: Language;
   series: Record<string, Series>;
   shipmentOfReefer: Record<string, string>;
+  onRun: (run: LastRun) => void;
 }) {
   const [threadId, setThreadId] = useState(newThreadId);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -48,19 +50,30 @@ export default function Chat({ t, language, series, shipmentOfReefer }: {
       setTurns((all) => all.map((turn) => (turn.id === id ? change(turn) : turn)));
     setTurns((all) => [...all, { id, question, answer: "", tools: [], state: "running" }]);
     setDraft("");
+    const runs: ToolRun[] = []; // the same tool events, kept here for onRun
     try {
       await ask(question, threadId, language, (e) => {
-        if (e.event === "token") update((turn) => ({ ...turn, answer: turn.answer + e.data.text }));
-        else if (e.event === "tool_call") update((turn) => ({ ...turn, tools: [...turn.tools, e.data] }));
-        else if (e.event === "tool_result")
-          update((turn) => ({
-            ...turn,
-            tools: turn.tools.map((tool) =>
-              tool.id === e.data.id ? { ...tool, seconds: e.data.seconds, result: e.data.result, trace: e.data.trace } : tool,
-            ),
-          }));
-        else if (e.event === "done") update((turn) => ({ ...turn, answer: e.data.answer, stats: e.data.stats, state: "done" }));
-        else if (e.event === "error") update((turn) => ({ ...turn, error: e.data.message, state: "error" }));
+        switch (e.event) {
+          case "token":
+            update((turn) => ({ ...turn, answer: turn.answer + e.data.text }));
+            break;
+          case "tool_call":
+            runs.push({ ...e.data });
+            update((turn) => ({ ...turn, tools: [...turn.tools, e.data] }));
+            break;
+          case "tool_result": {
+            const done = { seconds: e.data.seconds, result: e.data.result, trace: e.data.trace };
+            Object.assign(runs.find((run) => run.id === e.data.id) ?? {}, done);
+            update((turn) => ({ ...turn, tools: turn.tools.map((tool) => (tool.id === e.data.id ? { ...tool, ...done } : tool)) }));
+            break;
+          }
+          case "done":
+            update((turn) => ({ ...turn, answer: e.data.answer, stats: e.data.stats, state: "done" }));
+            onRun(lastRun(runs));
+            break;
+          case "error":
+            update((turn) => ({ ...turn, error: e.data.message, state: "error" }));
+        }
       });
       update((turn) => (turn.state === "running" ? { ...turn, state: "error", error: t.chat.cutOff } : turn));
     } catch (error) {
@@ -140,6 +153,12 @@ export default function Chat({ t, language, series, shipmentOfReefer }: {
       </form>
     </section>
   );
+}
+
+/** The tools a question called and the collections its engine traces read, for the Architecture tab. */
+function lastRun(tools: ToolRun[]): LastRun {
+  const collections = new Set(tools.flatMap((tool) => tool.trace ?? []).flatMap((step) => step.collections));
+  return { tools: tools.map((tool) => tool.name), collections: [...collections] };
 }
 
 function argumentsText(args: Record<string, unknown>): string {
