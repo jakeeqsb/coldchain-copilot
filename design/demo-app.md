@@ -27,7 +27,7 @@ agent answers in the UI language.
 
 | Tab | Shows | Data |
 |---|---|---|
-| **Operations** | Fleet strip; per-shipment measurement dashboard (temperature with its allowed band, power, door, over-range spans); chat with a streamed answer, the charts for that answer, and the engine trace | Read APIs, ask stream |
+| **Operations** | Fleet strip; temperature comparison across the fleet; per-shipment measurement dashboard (temperature with its allowed band, power, door, over-range spans); chat with a streamed answer, the charts for that answer, and the engine trace | Read APIs, ask stream |
 | **Ontology** | High level: a graph of object types, cargo classes, event and action types, and their link types. Click a type to drill into an entity graph (shipments, reefers, clauses, parties) with kind, shipment, status, and search filters, plus a relation table | Ontology APIs |
 | **Architecture** | The components and MongoDB collections; picking a flow (obligations, briefing, search) lights the path and the collections it reads | Static, plus the last trace |
 | **Why MongoDB** | One card per feature used (Time Series, `$setWindowFields`, `$vectorSearch`, `$lookup`, `$graphLookup`, checkpoints) with the real pipeline | Static |
@@ -66,7 +66,8 @@ flowchart LR
 - Read APIs go through `gateway.call` wherever a tool already returns the
   data, so the browser gets the same JSON, times, and errors the LLM gets.
 - `uv run coldchain-copilot-web` serves the API on `localhost:8000`.
-  During development, Vite serves the frontend and proxies `/api` there.
+  In `frontend/`, `npm install` once, then `npm run dev` serves the app on
+  `localhost:5173` and proxies `/api` to the API.
 
 ## 4. API
 
@@ -116,7 +117,7 @@ language to answer in.
 | Day | Part | Status | Commit |
 |---|---|---|---|
 | 1 | Plan, backend, tests | done | ① |
-| 2–3 | Frontend shell, Operations tab | not started | ② |
+| 2–3 | Frontend shell, Operations tab | done | ② |
 | 4 | Ontology, Architecture, Why MongoDB tabs | not started | ③ |
 | 5 | UI fixes | not started | ④ |
 
@@ -133,11 +134,12 @@ language to answer in.
 
 ### Day 2–3 · Frontend and Operations
 
-- [ ] Vite + React + TypeScript shell, tabs, EN/KO switch; `node_modules` and `frontend/dist` in `.gitignore`
-- [ ] Fleet strip and per-shipment measurement dashboard
-- [ ] Chat with streamed answer
-- [ ] Answer charts chosen from tool results
-- [ ] Engine trace view
+- [x] Vite + React + TypeScript shell, tabs, EN/KO switch; `node_modules` and `frontend/dist` in `.gitignore`
+- [x] Fleet strip and per-shipment measurement dashboard
+- [x] Fleet temperature comparison (one small chart per reefer)
+- [x] Chat with streamed answer
+- [x] Answer charts chosen from tool results
+- [x] Engine trace view
 
 ### Day 4 · Other tabs
 

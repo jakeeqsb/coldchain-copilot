@@ -13,3 +13,7 @@ wheels/
 
 .pytest_cache/
 .DS_Store
+
+# Frontend
+node_modules/
+frontend/dist/
