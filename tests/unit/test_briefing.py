@@ -28,3 +28,17 @@ def test_fleet_briefing_covers_each_shipment_in_the_overview(monkeypatch) -> Non
         {"shipment": {"shipmentId": "SHP-1"}, "obligations": {"results": ["SHP-1"]}},
         {"shipment": {"shipmentId": "SHP-2"}, "obligations": {"results": ["SHP-2"]}},
     ]
+
+
+def test_fleet_briefing_gathers_each_shipments_trace(monkeypatch) -> None:
+    rows = [{"shipmentId": "SHP-1"}, {"shipmentId": "SHP-2"}]
+    monkeypatch.setattr(briefing.sensor, "get_fleet_overview", lambda fleet_id: {"shipments": rows})
+    monkeypatch.setattr(briefing.sensor, "find_excursions", lambda fleet_id: {})
+    monkeypatch.setattr(briefing.sensor, "find_energy_anomalies", lambda fleet_id: {})
+    monkeypatch.setattr(briefing.lookup, "get_shipment", lambda shipment_id: {})
+    monkeypatch.setattr(briefing, "evaluate_obligations", lambda shipment_id: {"results": [], "trace": [{"step": "object"}]})
+
+    result = briefing.collect_fleet_briefing("FLEET-01")
+
+    assert result["trace"] == [{"step": "object", "shipmentId": "SHP-1"}, {"step": "object", "shipmentId": "SHP-2"}]
+    assert all("trace" not in s["obligations"] for s in result["shipments"])

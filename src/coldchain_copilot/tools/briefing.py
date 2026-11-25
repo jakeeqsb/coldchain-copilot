@@ -15,6 +15,8 @@ those calls in code, in a fixed order (rule G1); the LLM still decides when
 a briefing is asked for, by choosing this tool.
 
 Results keep ``datetime`` values; ``tools/gateway.py`` serializes them.
+Each keeps the engine's ``trace`` at the top level, where the agent takes it
+out before the model reads the result.
 """
 
 from __future__ import annotations
@@ -55,16 +57,20 @@ def collect_fleet_briefing(fleet_id: str) -> Doc:
         ``fleetId``, ``overview`` (``get_fleet_overview``), ``excursions``
         (``find_excursions``), ``energy`` (``find_energy_anomalies``), and
         ``shipments``: one ``{"shipment", "obligations"}`` per shipment
-        (``get_shipment``, ``evaluate_obligations``).
+        (``get_shipment``, ``evaluate_obligations``), and ``trace``: every
+        shipment's engine steps, each with its ``shipmentId``.
     """
     overview = sensor.get_fleet_overview(fleet_id)
+    shipments, trace = [], []
+    for row in overview["shipments"]:
+        obligations = evaluate_obligations(row["shipmentId"])
+        trace += [{**step, "shipmentId": row["shipmentId"]} for step in obligations.pop("trace", [])]
+        shipments.append({"shipment": lookup.get_shipment(row["shipmentId"]), "obligations": obligations})
     return {
         "fleetId": fleet_id,
         "overview": overview,
         "excursions": sensor.find_excursions(fleet_id=fleet_id),
         "energy": sensor.find_energy_anomalies(fleet_id=fleet_id),
-        "shipments": [
-            {"shipment": lookup.get_shipment(row["shipmentId"]), "obligations": evaluate_obligations(row["shipmentId"])}
-            for row in overview["shipments"]
-        ],
+        "shipments": shipments,
+        "trace": trace,
     }

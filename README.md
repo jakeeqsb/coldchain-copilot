@@ -307,3 +307,4 @@ Start with [`design/architecture.md`](./design/architecture.md), then [`design/w
 | [`design/interfaces.md`](./design/interfaces.md) | Tools by level, parameters, return shapes, errors, briefing format |
 | [`design/decisions.md`](./design/decisions.md) | Key design decisions, engineering rules, and when to revisit them |
 | [`design/refactoring.md`](./design/refactoring.md) | Stage 6 refactoring plan (working document) |
+| [`design/demo-app.md`](./design/demo-app.md) | Demo web app plan and progress (working document) |
