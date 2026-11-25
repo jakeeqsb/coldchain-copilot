@@ -1,5 +1,8 @@
 # Interfaces
 
+**Answers:** what each of the ten tools takes and returns, and the rules they share.
+**Read first:** [architecture.md](./architecture.md); [walkthrough.md](./walkthrough.md) shows one tool call end to end.
+
 The LLM interacts with data only through these tools. Every tool is read-only.
 
 Tools are thin. They resolve scope and window, call the detector or engine that
@@ -16,8 +19,8 @@ job of the clauses, through `evaluate_obligations`.
 | 2 · Sensor | `find_excursions` | Out-of-range runs as events, with measures | `engine.detect_events` (`detect_temperature_excursion` + causes) |
 | 2 · Sensor | `find_energy_anomalies` | Power change vs. baseline, as a number | `detect_power_anomaly` |
 | 2 · Sensor | `get_reefer_timeline` | Time-bucketed temperature, power, door | `readings` aggregation (`$dateTrunc`) |
-| 3 · Documents | `search_knowledge` | Relevant chunks from contracts, SOPs, manuals | `$vectorSearch` (stage 4) |
-| 3 · Documents | `get_clause` | Exact clause text by `clauseId` or `chunkId` | `knowledge` find (stage 4) |
+| 3 · Documents | `search_knowledge` | Relevant chunks from contracts, SOPs, manuals | `$vectorSearch` |
+| 3 · Documents | `get_clause` | Exact clause text by `clauseId` or `chunkId` | `knowledge` find |
 | 4 · Briefing | `collect_fleet_briefing` | Everything a fleet briefing needs, in one call | the level 1, 2, and 5 tools, in a fixed order |
 | 5 · Ontology | `evaluate_obligations` | Status of every applicable clause for a shipment | `engine.evaluate_shipment` |
 | Ad hoc | `run_aggregation` | Numeric questions no fixed tool covers | Text-to-MQL, guarded |
@@ -31,7 +34,7 @@ Code layout:
 | `src/coldchain_copilot/tools/lookup.py` | `get_shipment` |
 | `src/coldchain_copilot/tools/sensor.py` | The four sensor tools and the scope and window rules they share |
 | `src/coldchain_copilot/tools/adhoc.py` | `run_aggregation` and its guard |
-| `src/coldchain_copilot/tools/documents.py` | `search_knowledge`, `get_clause` (stage 4) |
+| `src/coldchain_copilot/tools/documents.py` | `search_knowledge`, `get_clause` |
 | `src/coldchain_copilot/tools/briefing.py` | `evaluate_obligations` (`engine.evaluate_shipment` without `actions`), `collect_fleet_briefing` |
 | `src/coldchain_copilot/tools/gateway.py` | LLM tool schemas, name → function dispatch, error and date serialization |
 
@@ -131,7 +134,7 @@ The tool reports the number only. It does not label a change as an anomaly: the 
 
 `reefer_id` (required), `hours` or `start` / `end`, `bucket_minutes` (default 5, raised automatically to keep at most 96 buckets). Per bucket: average, min, max temperature; average and min power; door open.
 
-## Level 3 · Documents (stage 4)
+## Level 3 · Documents
 
 ### `search_knowledge`
 
@@ -154,6 +157,29 @@ Contract chunks are filtered by `contractId` and `version` from the shipment. Wi
 ### `get_clause`
 
 `clause_id` or `chunk_id`. Returns the exact chunk text and, if structured, the clause rule. Used when semantic search might miss a clause the evaluator already identified.
+
+## Level 4 · Briefing
+
+### `collect_fleet_briefing`
+
+| Param | Type | Notes |
+|---|---|---|
+| `fleet_id` | string | required |
+
+```js
+{
+  fleetId: "FLEET-01",
+  overview:   { ... },   // get_fleet_overview, last 24 hours
+  excursions: { ... },   // find_excursions, last 24 hours
+  energy:     { ... },   // find_energy_anomalies
+  shipments: [           // one per shipment in the overview
+    { shipment: { ... },       // get_shipment
+      obligations: { ... } }   // evaluate_obligations
+  ]
+}
+```
+
+The same calls the model used to make for a briefing, in two rounds (fleet tools, then one call per shipment), made in code in one. It returns those tools' results unchanged and adds nothing of its own. The model still decides that a briefing was asked for, by choosing this tool.
 
 ## Level 5 · Ontology
 
@@ -186,27 +212,6 @@ Contract chunks are filtered by `contractId` and `version` from the shipment. Wi
 ```
 
 The tool is `engine.evaluate_shipment` without its `actions` (the handlers' briefing items, which repeat the triggered results); only serialization is added. Every result has `source` for citing; `triggered` and `unresolved` results also have the clause `text`, so the answer quotes it without a `get_clause` call. Both are joined from `knowledge` by `chunkId` with `$lookup` when the clauses are selected: the clause names its chunk exactly, so this is a key join, not a vector search. Internally the engine runs the `detector` of every event type the selected clauses need, including door openings and compressor stops, so no extra LLM tool is needed for them. `status` is one of `triggered`, `not_triggered`, `unresolved`. For `unresolved`, `basis` names what is missing (`{ missingData: "event:humidity_breach" }` or `{ missingMeasure: "..." }`). Steps and rules: [ontology.md § 5](./ontology.md#5-execution-enginepy).
-
-### `collect_fleet_briefing`
-
-| Param | Type | Notes |
-|---|---|---|
-| `fleet_id` | string | required |
-
-```js
-{
-  fleetId: "FLEET-01",
-  overview:   { ... },   // get_fleet_overview, last 24 hours
-  excursions: { ... },   // find_excursions, last 24 hours
-  energy:     { ... },   // find_energy_anomalies
-  shipments: [           // one per shipment in the overview
-    { shipment: { ... },       // get_shipment
-      obligations: { ... } }   // evaluate_obligations
-  ]
-}
-```
-
-The same calls the model used to make for a briefing, in two rounds (fleet tools, then one call per shipment), made in code in one. It returns those tools' results unchanged and adds nothing of its own. The model still decides that a briefing was asked for, by choosing this tool.
 
 ## Ad Hoc
 

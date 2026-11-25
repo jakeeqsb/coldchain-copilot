@@ -1,5 +1,8 @@
 # Ontology
 
+**Answers:** every ontology definition, the rule format, and the exact steps the engine takes.
+**Read first:** [architecture.md](./architecture.md) for where the ontology sits.
+
 The ontology defines **what things are, how they connect, and what can be done to them**. With it, the question "does Article 6 apply?" is answered by data and named functions, not by the LLM reading a sentence.
 
 It has three parts, plus rules written in its vocabulary, plus one registry in code:

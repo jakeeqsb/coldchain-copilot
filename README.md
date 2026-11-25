@@ -296,11 +296,13 @@ coldchain-copilot/
 └── tests/                 unit/ (no database) · integration/ (MongoDB with seed data)
 ```
 
-`evaluate_obligations`, the ninth tool, is `engine.evaluate_shipment` registered in the gateway.
+Start with [`design/architecture.md`](./design/architecture.md), then [`design/walkthrough.md`](./design/walkthrough.md). The others are references.
 
-| Design document | Contents |
+| Design document | Answers |
 |---|---|
-| [`design/entities.md`](./design/entities.md) | Collections, document schemas, seeded data |
+| [`design/architecture.md`](./design/architecture.md) | What is in the system, and how the parts work together |
+| [`design/walkthrough.md`](./design/walkthrough.md) | What happens, in order, when an operator asks a question |
+| [`design/entities.md`](./design/entities.md) | Collections, document schemas, chunking, seeded data |
 | [`design/ontology.md`](./design/ontology.md) | Classes, relations, measures, rule format, evaluation |
 | [`design/interfaces.md`](./design/interfaces.md) | Tools by level, parameters, return shapes, errors, briefing format |
 | [`design/decisions.md`](./design/decisions.md) | Key design decisions, engineering rules, and when to revisit them |

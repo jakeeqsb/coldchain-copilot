@@ -1,5 +1,8 @@
 # Design Decisions
 
+**Answers:** why the system is built this way, what each choice costs, and when to revisit it.
+**Read first:** [architecture.md](./architecture.md).
+
 ## 1. Embed the temperature policy in each reading
 
 Each reading carries its shipment's `minC`, `maxC`, and `policyVersion` in `meta`.

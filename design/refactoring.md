@@ -393,16 +393,32 @@ Requires `.env` (OpenAI and Voyage keys) to measure.
 
 ### Step 6. Documents
 
-- [ ] Chunking strategy in `ontology.md` or `entities.md`: structure-based,
+- [x] Chunking strategy in `ontology.md` or `entities.md`: structure-based,
       one chunk per Article/Section. Why: clause = judgment unit = citation
       unit; `chunkId` joins `clauses` and `knowledge`; the documents are
       short; cross-references are followed with `$graphLookup`, not chunk
       overlap. Limits: long clauses → parent-child chunks; nested numbering;
       documents without headings → fixed-size fallback.
-- [ ] `interfaces.md`: remove "(stage 4)" markers; 10 tools.
-- [ ] Kernel/domain map (§ 5) moved into `decisions.md` or `ontology.md`.
-- [ ] Replace key ASCII diagrams in `ontology.md` and `interfaces.md` with
+- [x] `interfaces.md`: remove "(stage 4)" markers; 10 tools.
+- [x] Kernel/domain map (§ 5) moved into `decisions.md` or `ontology.md`.
+- [x] Replace key ASCII diagrams in `ontology.md` and `interfaces.md` with
       Mermaid where it reads better.
+
+Result 6 (2026-11-25). Documents are split by the reader's question, each
+opening with the question it answers and what to read first:
+`architecture.md` (new: the entities, the components, where the ontology
+meets the code, layers, kernel and domain; the kernel map moved here rather
+than to `decisions.md` or `ontology.md`, because it describes the code's
+structure), `walkthrough.md` (new: one question from the CLI to MongoDB and
+back), and the existing reference documents. Diagrams are Mermaid, in
+English, with one claim each; the overview at the top of `architecture.md`
+is a draw.io SVG (`design/images/architecture.drawio.svg`), editable in
+draw.io. The chunking strategy is in `entities.md`, whose `knowledge`
+schema was also out of date (`title` / `section` → `source` / `heading`).
+Long reference tables are folded with `<details>`. The cargo tree in
+`ontology.md` and the briefing template in `interfaces.md` stay as text:
+they are a tree and a format, which text shows better. Package
+restructuring (kernel / domain) stays out of scope until the builder.
 
 ### Out of scope
 
@@ -415,20 +431,9 @@ Requires `.env` (OpenAI and Voyage keys) to measure.
 - LangChain's prebuilt `create_agent` (rule G1: the agent stays a
   `StateGraph`).
 
-## 5. Kernel / Domain Map (today)
+## 5. Kernel / Domain Map
 
-| Module | Kernel (generic) | Domain (cold chain) |
-|---|---|---|
-| `rules.py` | all | — |
-| `registry.py` | structure | the registered functions |
-| `engine.py` | the six steps | `Shipment` hard-coding (removed in step 2) |
-| `ontology.py` | `dependent_clauses`, `ontology_docs` | `applicable_clauses` (contract and cargo rules) |
-| `detection.py` | `run_pipeline`, `trend_pipeline`, `attach_causes` | the five `detect_*` functions (causes moved to the ontology in step 3) |
-| `catalog.py` | name-resolution checks | `chunkId` format, `cargo_specs` |
-| `ingest.py` | structure-based chunking, embedding, index | the `Article|Section` heading pattern |
-| `tools/` | `gateway` skeleton, `documents`, `adhoc` | `sensor`, `lookup` |
-| `embeddings.py` (step 1) | all | — |
-| `agent.py` | graph shape (route, collect, llm ⇄ tools) | the system prompt and briefing format |
+Moved to [architecture.md, Kernel and domain](./architecture.md#kernel-and-domain) in step 6, updated for steps 2–5.
 
 ## 6. Direction: the Ontology Builder
 
@@ -500,4 +505,4 @@ equipment maintenance) should follow it in phase 1.
 | 3 | done | causes as data |
 | 4 | done | catalog checks |
 | 5 | done | agent and latency (5.1–5.6) |
-| 6 | not started | documents |
+| 6 | done | documents |
