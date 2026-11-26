@@ -151,3 +151,8 @@ language to answer in.
 ### Day 5 · Fixes
 
 - [ ] Fixes found while running the demo questions
+- [x] Visual style: one mono typeface (JetBrains Mono, Noto Sans KR), pale paper, Atlas palette; graph stages stay dark
+- [x] Fleet cards with a container mark; fleet temperature and dashboard restyled
+- [x] Architecture: each flow opens with an overview, then steps through; a clicked component no longer replaces the flow
+- [x] Why MongoDB: five stores against one (diagrams), limits of RAG alone, one modeling story per kind of data, what MongoDB does not do
+- [x] [`why-mongodb.md`](./why-mongodb.md) and README § 2 tell the same story

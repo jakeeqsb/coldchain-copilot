@@ -68,7 +68,7 @@ function FleetWidget({ rows, t }: { rows: FleetEntry[]; t: Text }) {
 function TemperatureWidget({ shipmentId, series, t }: { shipmentId: string; series: Series | undefined; t: Text }) {
   return (
     <Card title={`${t.dash.temp} · ${shipmentId}`} note={t.window}>
-      {series ? <ShipmentChart series={series} labels={t.dash} width={640} /> : <p className="empty">{t.loading}</p>}
+      {series ? <ShipmentChart series={series} labels={t.dash} width={760} compact /> : <p className="empty">{t.loading}</p>}
     </Card>
   );
 }

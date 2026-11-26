@@ -32,7 +32,11 @@ export default function App() {
     <>
       <header className="bar">
         <div className="brand">
-          <b>ColdChain Copilot</b>
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+            <rect x="2" y="5" width="18" height="12" rx="2" fill="var(--accent-soft)" stroke="var(--edge)" strokeWidth="1.4" />
+            <path d="M7 5v12M11 5v12M15 5v12" stroke="var(--edge)" strokeOpacity=".4" />
+          </svg>
+          <b>ColdChain <mark>Copilot</mark></b>
           <span>{t.brandSub}</span>
         </div>
         <nav className="tabs" role="tablist">

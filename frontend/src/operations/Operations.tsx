@@ -108,8 +108,11 @@ export default function Operations({ t, language, onRun }: { t: Text; language: 
         </section>
       )}
       </div>
-      <Chat t={t} language={language} series={series} onRun={onRun}
-            shipmentOfReefer={Object.fromEntries((cards ?? []).map((c) => [c.row.reeferId, c.row.shipmentId]))} />
+      {/* The chat takes the height of the left column and scrolls inside it. */}
+      <div className="chat-cell">
+        <Chat t={t} language={language} series={series} onRun={onRun}
+              shipmentOfReefer={Object.fromEntries((cards ?? []).map((c) => [c.row.reeferId, c.row.shipmentId]))} />
+      </div>
       </div>
     </div>
   );
@@ -122,28 +125,36 @@ function FleetCard({ card, t, selected, onSelect }: { card: ShipmentCard; t: Tex
   const outside = row.lastTemp < minC || row.lastTemp > maxC;
   return (
     <button type="button" role="option" aria-selected={selected} className={`fs ${CHIP[v.kind]}`} onClick={onSelect}>
+      <ContainerMark kind={v.kind} />
       <span className="fs-head">
         <b>{row.reeferId}</b>
         <span className="fs-id">{row.shipmentId}</span>
       </span>
       <span className="fs-cargo">{t.cargo[shipment.cargoType] ?? shipment.cargoType}</span>
       <span className="fs-temp">
-        <span className={outside ? "hot" : undefined}>
-          {t.last} {row.lastTemp.toFixed(1)} °C
-        </span>
-        <span className="fs-range">
-          {t.range} {range(minC, maxC)}
-        </span>
+        <span className={`fs-now${outside ? " hot" : ""}`}>{row.lastTemp.toFixed(1)} °C</span>
+        <span className="fs-range">{range(minC, maxC)}</span>
       </span>
       <span className="fs-foot">
         <span className={`chip ${CHIP[v.kind]}`}>
           {t.status[v.kind]}
           {v.count ? ` ${v.count}` : ""}
         </span>
-        <span className="fs-range">
+        <span className={`fs-range${row.excursionCount ? " hot" : ""}`}>
           {t.excursions} {row.excursionCount}
         </span>
       </span>
     </button>
+  );
+}
+
+/** A plain container mark; the strip along its bottom is the shipment's state. */
+export function ContainerMark({ kind }: { kind: Verdict }) {
+  return (
+    <svg className={`mark ${CHIP[kind]}`} viewBox="0 0 34 22" aria-hidden="true">
+      <rect className="body" x="1" y="1" width="32" height="20" rx="2.5" />
+      <rect className="state" x="1.6" y="15" width="30.8" height="5.4" />
+      {[9, 17, 25].map((x) => <line key={x} x1={x} x2={x} y1="3" y2="15" />)}
+    </svg>
   );
 }

@@ -51,7 +51,7 @@ export const WIRES: Record<string, Wire> = {
   sensor: { d: "M680,246 L680,268 L135,268 L135,318", label: "sensor tools", at: [300, 262, "middle"] },
   reg: { d: "M530,353 L472,353", label: "name→fn" },
   det: { d: "M290,353 L232,353", label: "detector" },
-  rules: { d: "M730,353 L768,353", label: "compare" },
+  rules: { d: "M730,353 L768,353", label: "compare", at: [750, 314, "middle"] },
   d_read: { d: "M135,386 L135,498", label: "aggregate", db: true, at: [141, 470, "start"] },
   d_ship: { d: `M560,386 L560,440 L${cx("shipments")},440 L${cx("shipments")},498`, label: "load_object", db: true, at: [cx("shipments") + 6, 488, "start"] },
   d_onto: { d: `M590,386 L590,452 L${cx("ontology")},452 L${cx("ontology")},498`, label: "definitions", db: true, at: [cx("ontology") + 6, 488, "start"] },
@@ -72,6 +72,35 @@ export const FLOWS: Record<string, Flow> = {
   obligations: ENGINE_FLOW,
   briefing: { ...ENGINE_FLOW, wires: [...ENGINE_FLOW.wires, "sensor"] },
   search: { wires: ["q", "llm", "gw", "tools", "vec"], cards: ["ui", "agent", "llm", "gateway", "tools"], collections: ["knowledge", "checkpoints"] },
+};
+
+const step = (wires: string[], cards: string[], collections: string[] = []): Flow => ({ wires, cards, collections });
+
+/** What each numbered step of a flow lights, in the order of COPY[language].flowSteps. */
+export const STEP_LIGHTS: Record<string, Flow[]> = {
+  obligations: [
+    step(["q", "llm"], ["ui", "agent", "llm"]),
+    step(["gw", "tools", "eng"], ["gateway", "tools", "engine"]),
+    step(["d_ship", "d_onto"], ["engine"], ["shipments", "ontology"]),
+    step(["d_cl", "d_kn"], ["engine"], ["clauses", "knowledge"]),
+    step(["reg", "det", "d_read"], ["engine", "registry", "detection"], ["readings"]),
+    step(["rules", "d_cl"], ["engine", "rules"], ["clauses"]),
+    step(["llm", "q"], ["llm", "agent", "ui"], ["checkpoints"]),
+  ],
+  briefing: [
+    step(["q", "llm", "gw", "tools"], ["ui", "agent", "llm", "gateway", "tools"]),
+    step(["sensor", "d_read"], ["tools", "detection"], ["readings"]),
+    step(["eng", "d_ship", "d_onto", "d_cl", "d_kn", "reg", "det", "d_read", "rules"], ["engine", "registry", "detection", "rules"],
+         ["shipments", "ontology", "clauses", "knowledge", "readings"]),
+    step(["llm", "q"], ["llm", "agent", "ui"], ["checkpoints"]),
+  ],
+  search: [
+    step(["q", "llm", "gw", "tools"], ["ui", "agent", "llm", "gateway", "tools"]),
+    step([], ["tools"]),
+    step(["vec"], ["tools"], ["knowledge"]),
+    step(["llm", "q"], ["llm", "agent", "ui"], ["checkpoints"]),
+    step(["q", "llm", "gw", "tools", "vec"], ["ui", "agent", "llm", "gateway", "tools"], ["knowledge"]),
+  ],
 };
 
 /** The wire from the engine to each collection a trace step names. */
@@ -119,64 +148,94 @@ type Detail = { name: string; role: string; code: string; items: string[] };
 type Copy = {
   flowNames: Record<string, string>;
   flowTitles: Record<string, string>;
-  flowSteps: Record<string, string[]>;
+  flowSteps: Record<string, [string, string][]>;
   zones: [string, string, string, string];
   slabNote: string;
   details: Record<string, Detail>;
-  order: string;
   does: string;
   code: string;
   pickHint: string;
-  litFlow: string;
   lastEmpty: string;
   lastTitle: string;
   lastTools: string;
   lastCollections: string;
+  flow: string;
+  component: string;
+  flowIntros: Record<string, string>;
+  overview: string;
+  start: string;
+  prev: string;
+  next: string;
 };
 
 export const COPY: Record<Language, Copy> = {
   en: {
-    flowNames: { obligations: "Obligations", briefing: "Fleet briefing", search: "Document search", last: "Last question", none: "Show all" },
+    flowNames: { obligations: "Required actions", briefing: "Fleet briefing", search: "Document search", last: "Last question", none: "Show all" },
     flowTitles: {
-      obligations: 'Obligations: "Whom must SHP-102 notify, and by when?"',
+      obligations: 'Required actions: "Whom must SHP-102 notify, and by when?"',
       briefing: 'Fleet briefing: "Brief me on FLEET-01."',
       search: 'Document search: "How long may the door stay open while unloading tuna?"',
     },
     flowSteps: {
       obligations: [
-        "The LLM picks evaluate_obligations",
-        "Gateway → tool → engine",
-        "Reads the shipment and its definitions (shipments, ontology)",
-        "Applicable clauses with their text ($lookup knowledge)",
-        "Finds each detector through the registry and aggregates readings",
-        "Compares conditions; follows Art. 7 with $graphLookup",
-        "The LLM answers quoting the text; the conversation goes to checkpoints",
+        ["Reads the question and picks a tool",
+         "The LLM reads the 10 tool descriptions and picks the one that decides required actions (evaluate_obligations), for SHP-102. The LLM only picks the tool; it does not decide anything."],
+        ["The request passes one gate to the engine",
+         "Every tool call goes through the Gateway. It runs the function with that name and returns errors as results instead of crashing the agent."],
+        ["Reads the shipment and how it is defined",
+         "The ontology says a shipment lives in shipments, is keyed by shipmentId, and runs from departure to delivery. The engine reads SHP-102 and its period that way."],
+        ["Picks the contract clauses that apply",
+         "From the contract version and the cargo class (live fish → live seafood → seafood) it selects 9 clauses, and $lookup attaches each clause's text in the same query."],
+        ["Finds incidents in the sensor readings",
+         "For each event a clause waits on (temperature excursion, compressor stop, …) the Registry finds the detector, which aggregates readings. Consecutive runs are grouped inside the database with $setWindowFields."],
+        ["Compares with each condition and decides",
+         "Each clause's condition is checked against the measured value: 24 min ≥ 15 min, so Art. 6 triggers. Clauses that build on a triggered one (Art. 7) are found with $graphLookup."],
+        ["Answers, quoting the sources",
+         "The LLM writes the answer from the engine's result and the clause text. Numbers and deadlines are the engine's. The conversation is saved in checkpoints for follow-up questions."],
       ],
       briefing: [
-        "The LLM picks one tool: collect_fleet_briefing",
-        "The tool collects the fleet overview, excursions, and power trends",
-        "The engine runs its six steps for each of the five shipments",
-        "One more LLM call, which writes the briefing as it streams",
+        ["Sees a briefing request and picks one tool",
+         "The LLM picks collect_fleet_briefing. The code makes all the lookups a briefing needs in one go, so the LLM does not go back and forth between tools."],
+        ["Gathers sensor summaries for the whole fleet",
+         "Per reefer: average, lowest, and highest temperature, temperature excursions, and power trends, aggregated from readings."],
+        ["Decides required actions for each shipment",
+         "For each of the five shipments the engine runs the same six steps as Required actions. Each run takes tens of milliseconds."],
+        ["Writes the briefing as it streams",
+         "One more LLM call, ordered as action required, needs confirmation, incidents. Text appears on screen as it is written."],
       ],
       search: [
-        "The LLM picks search_knowledge",
-        "The question is embedded",
-        "$vectorSearch, filtered to the shipment's contract version and cargo SOPs",
-        "The answer quotes the chunks found",
-        "No engine: this asks for text, not a verdict",
+        ["Sees that the answer is in a document",
+         "\"How long may the door stay open while unloading tuna?\" asks for a rule's wording, not a verdict. The LLM picks search_knowledge."],
+        ["Turns the question into numbers",
+         "MongoDB's Voyage AI embedding model (voyage-4) turns the question's meaning into a vector of 1,024 numbers."],
+        ["Finds the passages closest in meaning",
+         "$vectorSearch finds the nearest chunks in knowledge. A filter keeps only the shipment's contract version and the SOPs for its cargo, so another shipper's contract is never cited."],
+        ["Answers, quoting what it found",
+         "The LLM answers and names each passage's source: the document and the article."],
+        ["Does not use the engine",
+         "Nothing needs a verdict here, so the engine path stays dark."],
       ],
     },
     zones: ["AGENT", "TOOLS", "ENGINE", "MONGODB ATLAS · ONE DATABASE"],
     slabNote: "Sensors, facts, definitions, rules, documents, and conversations: one cluster, one query language",
-    order: "Order",
     does: "What it does",
     code: "Code",
-    pickHint: "Click a component for its details.",
-    litFlow: "Lit flow",
+    pickHint: "Click a component on the stage for its details here.",
     lastEmpty: "Ask a question in the Operations tab; its path shows here.",
     lastTitle: "Last question",
     lastTools: "Tools called",
     lastCollections: "Collections the engine read",
+    flow: "Flow",
+    component: "Component",
+    flowIntros: {
+      obligations: "A question about one shipment: what must be done now, by whom, and by when. The engine decides, by comparing the contract clauses with the sensor readings; the LLM passes the result on with its sources. It is the longest path, through the engine and most of the collections.",
+      briefing: "A request to sum up the whole fleet today. One tool brings back the sensor summary of all five reefers and the required actions for every shipment; the LLM turns that into a briefing that is easy to read.",
+      search: "A question about the wording of a rule or a manual. Nobody knows which document holds it, so the search goes by meaning (vector search). Nothing needs a verdict, so the engine is not used.",
+    },
+    overview: "← Overview",
+    start: "Step through →",
+    prev: "← Back",
+    next: "Next →",
     details: {
       ui: { name: "Operator UI", role: "Where questions are asked and answers, evidence, and traces are shown", code: "frontend/ · cli.py", items: ["Sends: the question, thread id, language", "Receives: text as it is written, tool events, the engine trace, stats"] },
       agent: { name: "Agent", role: "LangGraph StateGraph: the loop between the LLM and the tools", code: "src/coldchain_copilot/agent.py", items: ["llm node: prompt plus tool results of the last 3 questions", "tools node: runs the requested tools concurrently", "The current time and answer language come in the run context"] },
@@ -196,47 +255,72 @@ export const COPY: Record<Language, Copy> = {
     },
   },
   ko: {
-    flowNames: { obligations: "의무 질문", briefing: "플릿 브리핑", search: "문서 검색", last: "방금 한 질문", none: "전체 보기" },
+    flowNames: { obligations: "조치 판정", briefing: "플릿 브리핑", search: "문서 검색", last: "방금 한 질문", none: "전체 보기" },
     flowTitles: {
-      obligations: '의무 질문: "SHP-102는 누구에게 언제까지 통보?"',
+      obligations: '조치 판정: "SHP-102는 누구에게 언제까지 통보해야 해?"',
       briefing: '플릿 브리핑: "FLEET-01 현황"',
       search: '문서 검색: "참치 하역 때 문은 얼마나?"',
     },
     flowSteps: {
       obligations: [
-        "LLM이 evaluate_obligations를 고름",
-        "gateway → 도구 → 엔진",
-        "배송과 정의를 읽음 (shipments, ontology)",
-        "적용 조항과 원문 ($lookup knowledge)",
-        "레지스트리로 탐지기를 찾아 readings 집계",
-        "규칙으로 조건 비교, $graphLookup으로 7조",
-        "LLM이 원문을 인용해 답변, 대화는 checkpoints에",
+        ["질문을 읽고 필요한 도구를 고릅니다",
+         "LLM이 도구 설명 10개를 읽고 '조치를 판정하는 도구'(evaluate_obligations)를 골라 SHP-102로 부릅니다. LLM은 판정하지 않고 도구만 고릅니다."],
+        ["요청이 하나의 문을 지나 엔진으로 갑니다",
+         "모든 도구 호출은 Gateway를 지납니다. Gateway가 이름에 맞는 함수를 실행하고, 오류가 나도 에이전트를 멈추지 않고 결과로 돌려줍니다."],
+        ["배송과 그 정의를 읽습니다",
+         "온톨로지에 '배송은 shipments 컬렉션, 키는 shipmentId, 기간은 출발부터 도착까지'라고 정의되어 있습니다. 엔진은 이 정의대로 SHP-102와 운송 기간을 읽습니다."],
+        ["이 배송에 적용되는 계약 조항을 고릅니다",
+         "계약 버전과 화물 분류(활어 → 활수산물 → 수산물)로 조항 9개를 고르고, $lookup으로 각 조항의 원문을 같은 쿼리에서 붙입니다."],
+        ["센서 기록에서 사건을 찾습니다",
+         "조항이 기다리는 사건(온도 이탈, 압축기 정지 등)마다 Registry가 탐지 함수를 찾아 readings를 집계합니다. 연속된 구간은 $setWindowFields로 DB 안에서 묶습니다."],
+        ["조건과 비교해 발동 여부를 정합니다",
+         "조항의 조건을 실제 값과 비교합니다. 24분 ≥ 15분이라 6조가 발동합니다. 발동한 조항을 참조하는 조항(7조)은 $graphLookup으로 따라가 찾습니다."],
+        ["근거를 인용해 답합니다",
+         "LLM이 엔진 결과와 조항 원문으로 답을 씁니다. 숫자와 기한은 엔진이 정한 그대로입니다. 대화는 checkpoints에 저장되어 후속 질문에 쓰입니다."],
       ],
       briefing: [
-        "LLM이 collect_fleet_briefing 하나를 고름",
-        "도구가 플릿 요약, 이탈, 전력 추세를 수집",
-        "배송 5건마다 엔진 6단계 (같은 길을 5번)",
-        "LLM 호출은 1번 더, 브리핑을 쓰며 화면에 스트리밍",
+        ["브리핑 요청임을 알아보고 도구 하나를 고릅니다",
+         "LLM이 collect_fleet_briefing을 고릅니다. 브리핑에 필요한 조회를 코드가 한 번에 하기 때문에, LLM이 도구를 여러 번 오가지 않습니다."],
+        ["플릿 전체의 센서 요약을 모읍니다",
+         "리퍼마다 평균·최저·최고 온도, 온도 이탈, 전력 추세를 readings에서 집계합니다."],
+        ["배송마다 필요한 조치를 판정합니다",
+         "배송 5개 각각에 대해 엔진이 '조치 판정'과 같은 6단계를 돕니다. 한 번에 수십 밀리초 걸립니다."],
+        ["브리핑을 쓰며 화면에 바로 보여 줍니다",
+         "LLM 호출은 한 번 더입니다. 조치 필요, 확인 필요, 사건 순서로 정리하고, 글자가 써지는 대로 화면에 나옵니다."],
       ],
       search: [
-        "LLM이 search_knowledge를 고름",
-        "질문을 임베딩",
-        "$vectorSearch: 그 배송의 계약 버전과 화물 SOP만 필터",
-        "찾은 조각을 인용해 답변",
-        "엔진은 쓰지 않음: 판정이 아니라 원문 질문",
+        ["문서에서 답을 찾아야 하는 질문임을 알아봅니다",
+         "'참치 하역 때 문을 얼마나 열어 둬도 되나'는 판정이 아니라 규정 문구를 묻는 질문입니다. LLM이 search_knowledge를 고릅니다."],
+        ["질문을 숫자로 바꿉니다",
+         "MongoDB의 Voyage AI 임베딩 모델(voyage-4)이 질문의 뜻을 숫자 1,024개짜리 벡터로 바꿉니다."],
+        ["뜻이 가장 가까운 문서 조각을 찾습니다",
+         "$vectorSearch가 knowledge에서 가까운 조각을 찾습니다. 그 배송의 계약 버전과 화물 SOP만 남기도록 필터해서, 다른 화주의 계약은 근거로 나오지 않습니다."],
+        ["찾은 원문을 인용해 답합니다",
+         "LLM이 조각의 출처(문서와 조항)를 밝히며 답합니다."],
+        ["엔진은 쓰지 않습니다",
+         "무엇이 발동했는지 판정할 질문이 아니라서, 엔진 쪽 경로는 꺼진 채로 남습니다."],
       ],
     },
     zones: ["AGENT", "TOOLS", "ENGINE", "MONGODB ATLAS · 하나의 데이터베이스"],
     slabNote: "센서 · 사실 · 정의 · 규칙 · 원문 · 대화가 같은 클러스터, 같은 쿼리 언어",
-    order: "순서",
     does: "하는 일",
     code: "코드",
-    pickHint: "구성 요소를 누르면 각각의 설명이 나옵니다.",
-    litFlow: "켜진 흐름",
+    pickHint: "무대의 구성 요소를 누르면 여기에 설명이 나옵니다.",
     lastEmpty: "운영 탭에서 질문하면 그 질문이 지나간 길이 여기 켜집니다.",
     lastTitle: "방금 한 질문",
     lastTools: "부른 도구",
     lastCollections: "엔진이 읽은 컬렉션",
+    flow: "흐름",
+    component: "구성 요소",
+    flowIntros: {
+      obligations: "배송 하나에 대해 '지금 무엇을, 누가, 언제까지 해야 하는지'를 묻는 질문입니다. 판정은 LLM이 아니라 엔진이 계약 조항과 센서 기록을 비교해서 내리고, LLM은 그 결과를 근거와 함께 전달합니다. 엔진과 대부분의 컬렉션을 거치는 가장 긴 흐름입니다.",
+      briefing: "플릿 전체의 오늘 상황을 한 번에 정리해 달라는 요청입니다. 도구 하나가 리퍼 5대의 센서 요약과 배송별 조치 판정을 모두 모아 오고, LLM은 그것을 읽기 쉬운 브리핑으로 씁니다.",
+      search: "규정이나 매뉴얼의 문구를 묻는 질문입니다. 어느 문서에 있는지 모르기 때문에 뜻으로 찾는 벡터 검색을 쓰고, 판정할 것이 없어서 엔진은 거치지 않습니다.",
+    },
+    overview: "← 흐름 소개",
+    start: "단계별로 보기 →",
+    prev: "← 이전",
+    next: "다음 →",
     details: {
       ui: { name: "운영자 화면", role: "질문하고, 답과 근거, 실행 기록을 보는 곳", code: "frontend/ · cli.py", items: ["보냄: 질문, thread id, 언어", "받음: 글자 스트림, 도구 이벤트, 엔진 기록, 통계"] },
       agent: { name: "Agent", role: "LangGraph StateGraph: LLM과 도구 사이의 고리", code: "src/coldchain_copilot/agent.py", items: ["llm 노드: 프롬프트 + 최근 질문 3개의 도구 결과", "tools 노드: 요청된 도구를 동시에 실행", "현재 시각과 답변 언어는 run context로 주입"] },

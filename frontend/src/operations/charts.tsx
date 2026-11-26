@@ -62,11 +62,19 @@ export type ChartLabels = { temp: string; power: string; door: string; band: str
  * One shipment's dashboard chart: temperature with its allowed band and
  * excursion spans, average power, and door openings, on one time axis.
  */
-export function ShipmentChart({ series, labels, width = 1200 }: { series: Series; labels: ChartLabels; width?: number }) {
+export function ShipmentChart({ series, labels, width = 820, compact = false }: {
+  series: Series;
+  labels: ChartLabels;
+  width?: number;
+  /** A lower chart for the chat column: the same marks with shorter panels. */
+  compact?: boolean;
+}) {
   const clipId = useId().replace(/:/g, "");
   const W = width, L = 46, R = 12;
-  const T = { top: 14, bottom: 214 }, P = { top: 236, bottom: 296 }, D = { top: 314, bottom: 328 };
-  const H = 352;
+  const T = compact ? { top: 14, bottom: 130 } : { top: 14, bottom: 214 };
+  const P = compact ? { top: 150, bottom: 180 } : { top: 236, bottom: 296 };
+  const D = compact ? { top: 192, bottom: 202 } : { top: 314, bottom: 328 };
+  const H = compact ? 226 : 352;
 
   const start = Date.parse(series.window.start), end = Date.parse(series.window.end);
   const x = linear([start, end], [L, W - R]);

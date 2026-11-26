@@ -112,7 +112,7 @@ export default function Ontology({ t }: { t: Text }) {
   const rings = useMemo(() => {
     const out: Record<string, string> = {};
     if (!shipment) return out;
-    out[shipment] = "#5fd0f0";
+    out[shipment] = TYPE_COLORS.Shipment;
     for (const [clauseId, st] of Object.entries(statuses[shipment] ?? {})) out[clauseId] = STATUS_COLORS[st];
     return out;
   }, [shipment, statuses]);

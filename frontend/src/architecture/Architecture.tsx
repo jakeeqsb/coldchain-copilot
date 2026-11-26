@@ -1,11 +1,13 @@
 // Architecture tab: components and collections on a dark stage. Picking a
 // flow lights the path a question takes; "last question" lights the path the
-// question just asked in the Operations tab actually took.
+// question just asked in the Operations tab actually took. The flow's steps
+// stay on the right; a step lights only its part, and a clicked component is
+// explained below the steps without replacing them.
 
 import { type KeyboardEvent, useState } from "react";
 
 import type { Language } from "../i18n";
-import { CARDS, COLLECTIONS, COPY, FLOWS, type Flow, ICONS, lastFlow, type LastRun, WIRES } from "./content";
+import { CARDS, COLLECTIONS, COPY, FLOWS, type Flow, ICONS, lastFlow, type LastRun, STEP_LIGHTS, WIRES } from "./content";
 
 const FLOW_IDS = ["obligations", "briefing", "search", "last", "none"] as const;
 type FlowId = (typeof FLOW_IDS)[number];
@@ -21,8 +23,12 @@ export default function Architecture({ language, lastRun }: { language: Language
   const copy = COPY[language];
   const [flowId, setFlowId] = useState<FlowId>(lastRun ? "last" : "obligations");
   const [picked, setPicked] = useState<string | null>(null);
+  const [stepIdx, setStepIdx] = useState<number | null>(null);
 
-  const flow: Flow | null = flowId === "none" ? null : flowId === "last" ? (lastRun ? lastFlow(lastRun) : null) : FLOWS[flowId];
+  const steps = STEP_LIGHTS[flowId];
+  const whole: Flow | null = flowId === "none" ? null : flowId === "last" ? (lastRun ? lastFlow(lastRun) : null) : FLOWS[flowId];
+  const flow: Flow | null = steps && stepIdx !== null ? steps[stepIdx] : whole;
+  const goStep = (k: number | null) => setStepIdx(k === null || !steps ? null : Math.max(0, Math.min(steps.length - 1, k)));
   const on = (list: keyof Flow, id: string) => !!flow && flow[list].includes(id);
   const dim = (list: keyof Flow, id: string) => !!flow && !flow[list].includes(id);
 
@@ -41,7 +47,7 @@ export default function Architecture({ language, lastRun }: { language: Language
           <b>Flow</b>
           {FLOW_IDS.map((id) => (
             <button key={id} type="button" className="pill" aria-pressed={flowId === id}
-                    onClick={() => { setFlowId(id); setPicked(null); }}>
+                    onClick={() => { setFlowId(id); setStepIdx(null); }}>
               {copy.flowNames[id]}
             </button>
           ))}
@@ -92,32 +98,72 @@ export default function Architecture({ language, lastRun }: { language: Language
           </svg>
         </div>
       </div>
-      <aside className="panel inspector" aria-live="polite">
-        <div className="panel-h"><h2>{picked ? copy.does : copy.flowNames[flowId]}</h2></div>
-        <div className="panel-b">
-          {picked ? (
-            <ComponentDetail id={picked} language={language} flowTitle={flowId !== "none" ? copy.flowNames[flowId] : null} />
-          ) : flowId === "last" ? (
-            <LastRunDetail lastRun={lastRun} language={language} />
-          ) : flowId === "none" ? (
-            <p className="demo">{copy.pickHint}</p>
-          ) : (
-            <>
-              <h3>{copy.flowTitles[flowId]}</h3>
-              <h4>{copy.order}</h4>
-              <ol className="flowsteps">
-                {copy.flowSteps[flowId].map((step) => <li key={step}>{step}</li>)}
-              </ol>
+      <div className="arch-side">
+        <aside className="panel inspector" aria-live="polite">
+          <div className="panel-h"><h2>{copy.flow} · {copy.flowNames[flowId]}</h2></div>
+          <div className="panel-b">
+            {flowId === "last" ? (
+              <LastRunDetail lastRun={lastRun} language={language} />
+            ) : flowId === "none" || !steps ? (
               <p className="demo">{copy.pickHint}</p>
-            </>
-          )}
-        </div>
-      </aside>
+            ) : (
+              <>
+                <h3>{copy.flowTitles[flowId]}</h3>
+                {stepIdx === null ? (
+                  <>
+                    <p className="intro">{copy.flowIntros[flowId]}</p>
+                    <ol className="flowsteps compact">
+                      {copy.flowSteps[flowId].map(([title], k) => (
+                        <li key={title}>
+                          <button type="button" className="fstep" onClick={() => goStep(k)}>
+                            <span className="n">{k + 1}</span>
+                            <span className="fs-t">{title}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="stepnav">
+                      <button type="button" className="btn" onClick={() => goStep(0)}>{copy.start}</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ol className="flowsteps">
+                      {copy.flowSteps[flowId].map(([title, detail], k) => (
+                        <li key={title}>
+                          <button type="button" className="fstep" aria-current={stepIdx === k ? "step" : undefined} onClick={() => goStep(k)}>
+                            <span className="n">{k + 1}</span>
+                            <span className="fs-t">{title}</span>
+                            {stepIdx === k && <span className="fs-d">{detail}</span>}
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="stepnav">
+                      <button type="button" className="btn ghost" onClick={() => goStep(stepIdx === 0 ? null : stepIdx - 1)}>
+                        {stepIdx === 0 ? copy.overview : copy.prev}
+                      </button>
+                      <button type="button" className="btn" disabled={stepIdx === steps.length - 1} onClick={() => goStep(stepIdx + 1)}>{copy.next}</button>
+                      <span className="stepcount">{stepIdx + 1} / {steps.length}</span>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </aside>
+        <aside className="panel inspector" aria-live="polite">
+          <div className="panel-h"><h2>{copy.component}</h2></div>
+          <div className="panel-b">
+            {picked ? <ComponentDetail id={picked} language={language} /> : <p className="demo">{copy.pickHint}</p>}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
 
-function ComponentDetail({ id, language, flowTitle }: { id: string; language: Language; flowTitle: string | null }) {
+function ComponentDetail({ id, language }: { id: string; language: Language }) {
   const copy = COPY[language];
   const d = copy.details[id];
   return (
@@ -130,7 +176,6 @@ function ComponentDetail({ id, language, flowTitle }: { id: string; language: La
       <ul>
         {d.items.map((item) => <li key={item}>{item}</li>)}
       </ul>
-      {flowTitle && <p className="demo">{copy.litFlow}: {flowTitle}</p>}
     </>
   );
 }
@@ -149,7 +194,6 @@ function LastRunDetail({ lastRun, language }: { lastRun: LastRun | null; languag
       <div className="rel">
         {lastRun.collections.length ? lastRun.collections.map((c) => <span key={c}>{c}</span>) : <span>–</span>}
       </div>
-      <p className="demo">{copy.pickHint}</p>
     </>
   );
 }

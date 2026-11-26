@@ -53,7 +53,7 @@ export default function SchemaGraph({ schema, selected, onNode, onEdge }: {
       .force("collide", d3.forceCollide<Node>((d) => radius(d.count) + 26));
 
     svg.append("defs").html(
-      '<marker id="schema-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5d8a9b"/></marker>',
+      '<marker id="schema-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4f7f8c"/></marker>',
     );
     const paths = svg.append("g").selectAll("path").data(edges).join("path")
       .attr("class", "sl").attr("marker-end", "url(#schema-arrow)")
@@ -74,8 +74,8 @@ export default function SchemaGraph({ schema, selected, onNode, onEdge }: {
         .on("start", (e) => { if (!e.active) sim.alphaTarget(0.3).restart(); })
         .on("drag", (e, d) => { d.tx = e.x; d.ty = e.y; })
         .on("end", (e) => { if (!e.active) sim.alphaTarget(0); }));
-    groups.append("circle").attr("class", "halo").attr("r", (d) => radius(d.count) + 7).attr("stroke", (d) => TYPE_COLORS[d.id] ?? "#8fb8c4");
-    groups.append("circle").attr("class", "core").attr("r", (d) => radius(d.count)).attr("fill", (d) => TYPE_COLORS[d.id] ?? "#8fb8c4");
+    groups.append("circle").attr("class", "halo").attr("r", (d) => radius(d.count) + 7).attr("stroke", (d) => TYPE_COLORS[d.id] ?? "#89a39b");
+    groups.append("circle").attr("class", "core").attr("r", (d) => radius(d.count)).attr("fill", (d) => TYPE_COLORS[d.id] ?? "#89a39b");
     groups.append("text").attr("y", (d) => radius(d.count) + 22).text((d) => d.id);
     groups.append("text").attr("class", "cnt").attr("y", (d) => radius(d.count) + 37).text((d) => d.count.toLocaleString());
 

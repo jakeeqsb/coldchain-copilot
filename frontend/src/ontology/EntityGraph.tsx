@@ -54,7 +54,7 @@ export default function EntityGraph({ graph, visible, query, rings, onSelect }: 
     const groups = svg.append("g").selectAll<SVGGElement, Node>("g").data(nodes).join("g")
       .attr("class", "nd").attr("tabindex", 0).attr("role", "button").attr("aria-label", (d) => `${d.type} ${d.label}`);
     groups.append("circle").attr("class", "ring").attr("r", (d) => size(d) + 4).attr("stroke", "transparent");
-    groups.append("circle").attr("class", "dot").attr("r", size).attr("fill", (d) => TYPE_COLORS[d.type] ?? "#8fb8c4");
+    groups.append("circle").attr("class", "dot").attr("r", size).attr("fill", (d) => TYPE_COLORS[d.type] ?? "#89a39b");
     groups.append("text").attr("x", (d) => size(d) + 4).attr("y", 4).text((d) => d.label);
 
     const neighbors = new Map(nodes.map((n) => [n.id, new Set([n.id])]));
