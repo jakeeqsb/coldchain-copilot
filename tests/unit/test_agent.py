@@ -218,3 +218,42 @@ def test_short_threads_are_sent_unchanged() -> None:
     messages = [HumanMessage("q"), AIMessage("", tool_calls=[tool_call("x", {}, "c")]),
                 ToolMessage("{}", tool_call_id="c")]
     assert agent.recent_tool_results(messages) is messages
+
+
+def test_trace_goes_to_the_artifact_not_to_the_model(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"results": [], "trace": [{"step": "object"}]})
+    model = ScriptedModel(AIMessage("", tool_calls=[tool_call("evaluate_obligations", {}, "c1")]), AIMessage("Done."))
+    graph = agent.build_graph(model, InMemorySaver())
+
+    state = graph.invoke({"messages": [("user", "q")]}, config("t11"))
+
+    message = [m for m in state["messages"] if isinstance(m, ToolMessage)][0]
+    assert json.loads(message.content) == {"results": []}
+    assert message.artifact["trace"] == [{"step": "object"}]
+    assert message.artifact["seconds"] >= 0
+
+
+def test_language_in_the_context_sets_the_answer_language() -> None:
+    model = ScriptedModel(AIMessage("A."), AIMessage("B."))
+    graph = agent.build_graph(model, InMemorySaver())
+
+    agent.ask(graph, "one", "t12", language="ko")
+    agent.ask(graph, "two", "t13")
+
+    assert "Answer in Korean, whatever the language of the question." in model.seen[0][0].content
+    assert "whatever the language" not in model.seen[1][0].content
+
+
+def test_on_tool_gets_each_call_and_its_result(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "call", lambda name, args: {"ok": True, "trace": [{"step": "object"}]})
+    model = ScriptedModel(AIMessage("", tool_calls=[tool_call("evaluate_obligations", {"shipment_id": "S"}, "c1")]),
+                          AIMessage("Done."))
+    graph = agent.build_graph(model, InMemorySaver())
+    events: list[tuple[str, dict]] = []
+
+    agent.ask(graph, "q", "t14", on_tool=lambda kind, data: events.append((kind, data)))
+
+    assert [kind for kind, _ in events] == ["tool_call", "tool_result"]
+    assert events[0][1] == {"id": "c1", "name": "evaluate_obligations", "arguments": {"shipment_id": "S"}}
+    result = events[1][1]
+    assert (result["id"], result["result"], result["trace"]) == ("c1", {"ok": True}, [{"step": "object"}])

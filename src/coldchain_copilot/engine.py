@@ -22,10 +22,14 @@ functions ``registry.py`` maps them to. For one shipment it takes six steps:
    briefing item.
 
 Nothing is stored; the result is returned to the caller (a tool, the agent).
+The result also carries a ``trace`` of the six steps (:func:`trace_step`),
+for a front end to show what each step read. The agent keeps it out of the
+model's input.
 """
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -49,45 +53,62 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         ``shipmentId``, ``contractRef``, ``period`` (``start``/``end``),
         ``results`` (one per applicable clause, from ``rules.py``, each with
         ``source``, ``text`` when quoted (:func:`attach_sources`), and a
-        ``follows`` list of dependent clause ids when triggered), and
-        ``actions`` (one briefing item per triggered clause).
+        ``follows`` list of dependent clause ids when triggered),
+        ``actions`` (one briefing item per triggered clause), and ``trace``
+        (one :func:`trace_step` per step).
 
     Raises:
         ToolError: ``NOT_FOUND`` if the shipment does not exist.
     """
+    trace: list[Doc] = []
+
     # 1. Object and period
+    started = time.perf_counter()
     shipment, start, end = load_object("Shipment", shipment_id, now)
     scope = {"meta.shipmentId": shipment_id}
+    trace.append(trace_step("object", [db.ONTOLOGY, db.SHIPMENTS], ["find"], 1, started))
 
     # 2. Applicable clauses, and the ontology entries they use
+    started = time.perf_counter()
     clauses = ontology.applicable_clauses(shipment)
     event_ids = {c["trigger"]["eventType"] for c in clauses if "eventType" in c["trigger"]}
     action_ids = {f"action:{c['action']['type']}" for c in clauses}
     defs = ontology.ontology_docs(event_ids | action_ids | {REFERENCES})
+    trace.append(trace_step("clauses", [db.ONTOLOGY, db.CLAUSES, db.KNOWLEDGE], ["$lookup"], len(clauses), started))
 
     # 3. Detect events through each event type's detector, with causes attached
+    started = time.perf_counter()
     events_by_type = detect_events(event_ids, scope, start, end)
     collected_by_type = {
         event_id: all(detection.field_collected(field, scope, start, end) for field in defs[event_id]["requiresFields"])
         for event_id in event_ids
     }
+    events = sum(len(found) for found in events_by_type.values())
+    trace.append(trace_step("events", [db.READINGS], ["Time Series", "$setWindowFields"], events, started))
 
     # 4. Compare conditions, and attach each clause's source
+    started = time.perf_counter()
     results = rules.evaluate_clauses(clauses, events_by_type, collected_by_type)
     attach_sources(results, clauses)
+    trace.append(trace_step("conditions", [], [], len(results), started))
 
     # 5. Follow references from triggered clauses
+    started = time.perf_counter()
     traverse = registry.TRAVERSERS[defs[REFERENCES]["traverse"]]
     for result in results:
         if result["status"] == "triggered":
             result["follows"] = [c["clauseId"] for c in traverse(result["clauseId"])]
+    followed = sum(len(r.get("follows", [])) for r in results)
+    trace.append(trace_step("references", [db.CLAUSES], ["$graphLookup"], followed, started))
 
     # 6. Run each triggered clause's action handler
+    started = time.perf_counter()
     actions = []
     for result in results:
         if result["status"] == "triggered":
             handler = registry.ACTIONS[defs[f"action:{result['action']['type']}"]["handler"]]
             actions.append(handler(result))
+    trace.append(trace_step("actions", [], [], len(actions), started))
 
     return {
         "shipmentId": shipment_id,
@@ -95,7 +116,26 @@ def evaluate_shipment(shipment_id: str, now: datetime | None = None) -> Doc:
         "period": {"start": start, "end": end},
         "results": results,
         "actions": actions,
+        "trace": trace,
     }
+
+
+def trace_step(step: str, collections: list[str], features: list[str], count: int, started: float) -> Doc:
+    """Records one engine step for the trace.
+
+    Args:
+        step: Step name: ``object``, ``clauses``, ``events``, ``conditions``,
+            ``references``, or ``actions``.
+        collections: Collections the step reads; empty for steps in code.
+        features: MongoDB features the step uses, e.g. ``["$graphLookup"]``.
+        count: What the step produced: clauses, events, results, ...
+        started: ``time.perf_counter()`` when the step began.
+
+    Returns:
+        ``{"step", "collections", "features", "count", "ms"}``.
+    """
+    ms = round((time.perf_counter() - started) * 1000, 1)
+    return {"step": step, "collections": collections, "features": features, "count": count, "ms": ms}
 
 
 QUOTED_STATUSES = frozenset({"triggered", "unresolved"})

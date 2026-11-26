@@ -9,7 +9,9 @@ The graph has two nodes and one decision, and nothing else::
   schemas bound. The model either answers or asks for tools.
 - ``tools`` runs every requested call through ``gateway.call`` and adds one
   ``ToolMessage`` per call. The gateway never raises: a failed call comes
-  back as ``{"error": ...}`` and the model decides how to retry.
+  back as ``{"error": ...}`` and the model decides how to retry. A result's
+  ``trace`` and the call's duration go in the message's ``artifact``, which
+  the model does not read; a front end shows them.
 
 All domain logic stays below the gateway. The agent knows tool names only
 through ``gateway.SCHEMAS``; it imports nothing from the engine or the tools.
@@ -53,6 +55,9 @@ TOOL_WORKERS = 8
 KEEP_TOOL_RESULTS_FOR = 3
 """The model sees tool results from this many most recent questions in full."""
 
+ANSWER_LANGUAGES = {"en": "English", "ko": "Korean"}
+"""Languages a front end can ask the answer in (:class:`Context`), by code."""
+
 OMITTED = json.dumps({"omitted": "Result from an earlier question, left out to save space. "
                                  "Call the tool again if you need it."})
 """What the model sees instead of an older tool result."""
@@ -62,7 +67,7 @@ You are the cold-chain operations copilot for a reefer fleet carrying seafood.
 You answer operators' questions about shipments, reefer sensor data, and the
 contracts, SOPs, and maintenance manuals that apply to them.
 
-Current time: {now}.
+Current time: {now}.{language}
 
 How to work
 - You are read-only. You cannot send, notify, schedule, or change anything,
@@ -123,9 +128,14 @@ class Context:
             clock; tests pass a fixed value so the prompt is the same on
             every run. The prompt shows it in ``gateway.DISPLAY_TZ``, the
             zone of every display string the tools return.
+        language: A key of ``ANSWER_LANGUAGES``. When set, the model answers
+            in that language, whatever the language of the question; a
+            front end passes its UI language. ``None`` keeps the prompt's
+            rule of answering in the question's language.
     """
 
     now: datetime
+    language: str | None = None
 
 
 def build_graph(model: Any, checkpointer: Any = None):
@@ -145,9 +155,11 @@ def build_graph(model: Any, checkpointer: Any = None):
     """
 
     def llm(state: MessagesState, runtime: Runtime[Context]) -> dict:
-        now = runtime.context.now if runtime.context else datetime.now(timezone.utc)
-        shown = now.astimezone(gateway.DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
-        prompt = SystemMessage(SYSTEM_PROMPT.format(now=shown))
+        context = runtime.context or Context(now=datetime.now(timezone.utc))
+        shown = context.now.astimezone(gateway.DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
+        language = ANSWER_LANGUAGES.get(context.language)
+        line = f"\nAnswer in {language}, whatever the language of the question." if language else ""
+        prompt = SystemMessage(SYSTEM_PROMPT.format(now=shown, language=line))
         return {"messages": [model.invoke([prompt, *recent_tool_results(state["messages"])])]}
 
     def tools(state: MessagesState) -> dict:
@@ -155,11 +167,12 @@ def build_graph(model: Any, checkpointer: Any = None):
         # map keeps the results in call order. The MongoClient is thread-safe.
         calls = state["messages"][-1].tool_calls
         with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
-            results = list(pool.map(lambda call: gateway.call(call["name"], call["args"]), calls))
+            results = list(pool.map(run_tool, calls))
         return {
             "messages": [
-                ToolMessage(content=json.dumps(result, ensure_ascii=False), tool_call_id=call["id"], name=call["name"])
-                for call, result in zip(calls, results, strict=True)
+                ToolMessage(content=json.dumps(result, ensure_ascii=False), tool_call_id=call["id"], name=call["name"],
+                            artifact=artifact)
+                for call, (result, artifact) in zip(calls, results, strict=True)
             ]
         }
 
@@ -170,6 +183,22 @@ def build_graph(model: Any, checkpointer: Any = None):
     graph.add_conditional_edges("llm", next_step, {"tools": "tools", END: END})
     graph.add_edge("tools", "llm")
     return graph.compile(checkpointer=checkpointer)
+
+
+def run_tool(call: dict) -> tuple[Any, dict]:
+    """Runs one tool call and splits off what only a front end needs.
+
+    Returns:
+        ``(result, artifact)``: the result the model reads, without its
+        ``trace``; and ``{"seconds"}`` plus ``"trace"`` when the result had
+        one.
+    """
+    started = time.perf_counter()
+    result = gateway.call(call["name"], call["args"])
+    artifact: dict = {"seconds": round(time.perf_counter() - started, 2)}
+    if isinstance(result, dict) and "trace" in result:
+        artifact["trace"] = result.pop("trace")
+    return result, artifact
 
 
 def next_step(state: MessagesState) -> str:
@@ -238,6 +267,8 @@ def ask(
     thread_id: str,
     now: datetime | None = None,
     on_token: Callable[[str], None] | None = None,
+    language: str | None = None,
+    on_tool: Callable[[str, dict], None] | None = None,
 ) -> dict:
     """Sends one question in a thread and returns the answer with its stats.
 
@@ -257,6 +288,11 @@ def ask(
         on_token: Called with each piece of text the ``llm`` node generates,
             so a front end can show the answer while it is written. Reasoning
             and tool calls are not passed.
+        language: The answer language (:class:`Context`), e.g. ``"ko"``.
+        on_tool: Called as ``on_tool("tool_call", {"id", "name", "arguments"})``
+            when the model asks for a tool, and
+            ``on_tool("tool_result", {"id", "name", "result", "seconds"})``,
+            plus ``"trace"`` when there is one, when the tool returns.
 
     Returns:
         ``{"answer": str, "stats": dict}``; see :func:`turn_stats`. With
@@ -269,7 +305,7 @@ def ask(
     seconds = {"llm": 0.0, "tools": 0.0}
     first_text: float | None = None
     started = last = time.perf_counter()
-    context = Context(now=now or datetime.now(timezone.utc))
+    context = Context(now=now or datetime.now(timezone.utc), language=language)
     stream = agent.stream({"messages": [("user", question)]}, config, context=context, stream_mode=["updates", "messages"])
     for mode, update in stream:
         if mode == "messages":
@@ -284,6 +320,8 @@ def ask(
         for node in update:
             seconds[node] = seconds.get(node, 0.0) + (now - last)
         last = now
+        if on_tool:
+            report_tools(update, on_tool)
 
     messages = agent.get_state(config).values["messages"]
     stats = turn_stats(messages[before:], last - started)
@@ -293,6 +331,18 @@ def ask(
     # .text joins the text blocks: newer models return content as a list of
     # blocks (reasoning, text, ...) rather than one string.
     return {"answer": messages[-1].text, "stats": stats}
+
+
+def report_tools(update: dict, on_tool: Callable[[str, dict], None]) -> None:
+    """Passes the tool calls and results in one ``updates`` event to ``on_tool``."""
+    for node, output in update.items():
+        for message in (output or {}).get("messages", []):
+            if node == "llm" and isinstance(message, AIMessage):
+                for call in message.tool_calls:
+                    on_tool("tool_call", {"id": call["id"], "name": call["name"], "arguments": call["args"]})
+            elif node == "tools" and isinstance(message, ToolMessage):
+                event = {"id": message.tool_call_id, "name": message.name, "result": json.loads(message.content)}
+                on_tool("tool_result", {**event, **(message.artifact or {})})
 
 
 def turn_stats(messages: list, elapsed: float) -> dict:

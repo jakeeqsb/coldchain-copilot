@@ -11,6 +11,7 @@ The full evaluation runs in tests/integration/test_scenarios.py. Here:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -118,3 +119,11 @@ def test_sources_are_none_before_the_documents_are_ingested() -> None:
     results = [{"clauseId": "a", "status": "triggered"}]
     engine.attach_sources(results, [{"clauseId": "a"}])
     assert results == [{"clauseId": "a", "status": "triggered", "source": None, "text": None}]
+
+
+def test_trace_step_records_what_a_step_read_and_how_long_it_took() -> None:
+    step = engine.trace_step("references", ["clauses"], ["$graphLookup"], 1, time.perf_counter())
+
+    assert {k: v for k, v in step.items() if k != "ms"} == {
+        "step": "references", "collections": ["clauses"], "features": ["$graphLookup"], "count": 1}
+    assert step["ms"] >= 0

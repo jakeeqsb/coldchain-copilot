@@ -41,6 +41,7 @@ LAYERS = {
     "tools": "tools",
     "agent": "agent",
     "cli": "agent",
+    "web": "agent",
 }
 """Top-level module (or subpackage) → layer. ``tools.*`` modules are all in ``tools``."""
 

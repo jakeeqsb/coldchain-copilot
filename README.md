@@ -4,6 +4,8 @@ An operations agent for cold-chain logistics. It reads reefer sensor data, check
 
 *MongoDB Solo Project · Time Series × Vector Search × Ontology × LLM tool calling*
 
+![The demo app's Operations tab: the fleet, RF-02's 24-minute excursion, and the copilot's answer with the engine's six steps](./design/images/screens/operation.png)
+
 ```text
 > Brief me on today's data.
   ↳ find_excursions({"fleet_id": "FLEET-01", "hours": 24})
@@ -69,88 +71,25 @@ The facts live in sensor data; the rules live in documents. ColdChain Copilot co
 
 ## 2. Why MongoDB
 
-Every answer this agent gives combines four things: sensor facts, shipment context, contract text, and rules. MongoDB keeps all four in one database, so each answer is one query path instead of an integration between systems.
+Every answer this agent gives combines sensor facts, shipment context, contract rules, and contract text. The usual build puts each in its own store (relational, time series, vector, graph, cache) and then keeps them in sync. Here they are collections in one MongoDB Atlas cluster, so a verdict and its evidence come from one query path instead of an integration between systems.
 
-```js
-// shipments — who, what, which policy, which contract
-{
-  shipmentId: "SHP-102",
-  fleetId: "FLEET-01",
-  reeferId: "RF-02",
-  cargoType: "cargo:live_fish",
-  temperaturePolicy: {
-    minC: 0,
-    maxC: 4,
-    policyVersion: "SHP-102-policy-v1"
-  },
-  contractRef: {
-    contractId: "blueharbor-live-fish",
-    version: "v1"
-  }
-}
+![Five stores joined by sync pipelines, against one MongoDB Atlas cluster with Voyage AI embeddings](./design/images/screens/why-mongodb.png)
 
-// readings (Time Series) — measurements + stable context in meta
-{
-  ts: ISODate("2026-10-15T00:12:00Z"),
-  meta: {
-    fleetId: "FLEET-01",
-    reeferId: "RF-02",
-    shipmentId: "SHP-102",
-    temperaturePolicy: {
-      minC: 0,
-      maxC: 4,
-      policyVersion: "SHP-102-policy-v1"
-    }
-  },
-  temp: 3.42,
-  powerKw: 2.13,
-  doorOpen: false
-}
+Each kind of data is modeled for the question it has to answer, and a specific MongoDB feature carries that model:
 
-// clauses — a contract article as a rule, linked to its source text
-{
-  clauseId: "blueharbor-live-fish-v1-art6",
-  contractId: "blueharbor-live-fish",
-  version: "v1",
-  trigger: {
-    eventType: "event:temperature_excursion",
-    allOf: [
-      { measure: "consecutiveMinutes", op: "gte", value: 15 }
-    ]
-  },
-  action: {
-    type: "notify",
-    party: "shipper.qa"
-  },
-  deadline: {
-    anchor: "eventStart",
-    offsetMinutes: 60
-  },
-  chunkId: "blueharbor-live-fish-v1-article-6"
-}
-```
+| Data | Problem | Model | MongoDB provides |
+|---|---|---|---|
+| Sensor readings | "Above 4 °C for 15 consecutive minutes" depends on order and continuity | One reading per document; shipment, reefer, and allowed range in `meta`; incidents computed, not stored | Time Series collections; `$setWindowFields` + `$shift` to split runs |
+| Contract rules | Clauses come in different shapes | One clause per document, in its own shape (`trigger`, `action`, `deadline`, `chunkId`) | Flexible schema; multikey indexes |
+| Ontology | Knowledge about types and causes scattered in code | Types, links, events, actions as documents; functions by name only | Definitions next to the data; ancestor arrays with `$in` |
+| Verdict + text | A verdict needs exactly its clause's text | Clause names its chunk by `chunkId` | `$lookup` in the same aggregation |
+| Clause references | "If Art. 6 applies, Art. 7 too" | `references` array | `$graphLookup` |
+| Document search | Unknown document; other shippers' contracts must stay out | Chunk = text + embedding + owner metadata | Voyage AI embeddings; `$vectorSearch` with a metadata filter |
+| Conversations | Follow-ups need earlier results | Checkpoint documents per thread | LangGraph `MongoDBSaver` |
 
-**Documents match the data.** A shipment is read as one object with its route, policy, and contract reference. Each reading carries its shipment's temperature policy (Extended Reference pattern), so detection needs no join and past readings keep the threshold they were recorded under. Clauses of different shapes share one collection (polymorphic documents), and new sensors or fields need no migration (flexible schema).
+What MongoDB does not do here: the LLM writes answers, application code (`rules.py`) decides whether a clause triggers, and no actions are carried out (the demo is read-only).
 
-**Time Series is built in.** Minute-level readings are stored in compressed buckets for efficient writes and storage, and queried with the same aggregation framework that turns consecutive out-of-range readings into excursions.
-
-**Vector Search sits beside the data.** Contract chunks are searched by meaning and filtered by the contract version stored on the shipment, so there is no metadata to copy into a separate vector store and keep in sync.
-
-**Graph relations stay inside, where they are shallow.** Clause dependencies are one or two hops, followed with `$graphLookup`. Network-scale analysis would call for a graph database alongside MongoDB, not instead of it.
-
-```text
- Typical stack for this workload           MongoDB
- ┌───────────┐ ┌──────────┐ ┌──────────┐    ┌──────────────────────────────┐
- │Time-series│ │   RDB    │ │Vector DB │    │ readings   (Time Series)     │
- │ (sensors) │ │(context, │ │  (text)  │    │ shipments                    │
- │           │ │  rules)  │ │          │    │ knowledge  (Vector Search)   │
- └─────┬─────┘ └────┬─────┘ └────┬─────┘    │ clauses · ontology           │
-       └─ ETL · sync · app joins ─┘         └──────────────┬───────────────┘
-                    │                                      │ MQL
-                   App ── LLM                             App ── LLM
-```
-
-Detailed rationale and tradeoffs: [`design/decisions.md`](./design/decisions.md) and [`design/entities.md`](./design/entities.md).
+The full story, with the costs of the five-store setup, the limits of RAG alone, document examples, and diagrams: [`design/why-mongodb.md`](./design/why-mongodb.md). Field-level schemas and tradeoffs: [`design/entities.md`](./design/entities.md) and [`design/decisions.md`](./design/decisions.md).
 
 ---
 
@@ -159,6 +98,8 @@ Detailed rationale and tradeoffs: [`design/decisions.md`](./design/decisions.md)
 In the five question levels of [§ 1](#1-what-it-does), RAG covers level 3, document search: *"what does the contract say?"* A briefing also needs level 5, rule decisions: *"what must we do, and by when?"* That is a judgment, and in this domain a wrong one has a cost: a missed notification deadline means paying for the freight and the lost cargo. An ontology is what turns retrieved text into decisions the system can make consistently.
 
 ### What happens with RAG alone
+
+(The six limits, side by side with how this project handles each, are in [`design/why-mongodb.md` § 2](./design/why-mongodb.md#2-why-rag-alone-is-not-enough).)
 
 RAG finds contract passages that look similar to the question, shows them to the LLM, and lets the LLM read them and answer. It is like pulling a few pages that seem relevant out of a contract and handing them to a new hire to decide. Ask about RF-02 (above 4°C for 24 minutes in a row), and three things can go wrong.
 
@@ -178,6 +119,12 @@ An ontology is close to a rulebook prepared from the contract in advance. For ea
 1. Article 7 is stored as "connected to Article 6," so when Article 6 applies, Article 7 comes with it.
 2. Conditions are stored as numbers, so the system just compares values. 24 minutes is at least 15, so Article 6 applies; it is under 30, so Article 8 does not. The answer is the same no matter how many times you ask.
 3. When the data a decision needs is missing, it is marked separately as "needs confirmation."
+
+The demo app shows the ontology from the database: the types and their relations, sized by real counts, and the entities around one shipment, colored by the engine's verdict.
+
+![Ontology schema: ten types and fourteen relations, with the Clause definition](./design/images/screens/ontology-schema.png)
+
+![Entities related to SHP-102: its reefer, contract, cargo classes, and the nine clauses that apply, with their verdicts](./design/images/screens/ontology-entities.png)
 
 The LLM still writes the briefing, and RAG is still used: it finds the source text of each decided clause to quote, and it answers questions no rule covers ("what should we watch for when unloading tuna?"). What changes is **who makes the decision**. Aggregation computes the numbers, rules decide the obligations, and the LLM explains the result.
 
@@ -249,6 +196,23 @@ Try the levels in order:
 
 All companies, contracts, SOPs, and manuals are fictional demo material.
 
+### Demo app
+
+The same agent in a browser, in English or Korean, with four tabs: **Operations** (fleet, per-shipment measurements, chat), **Ontology**, **Architecture**, and **Why MongoDB**. Plan and progress: [`design/demo-app.md`](./design/demo-app.md).
+
+```bash
+uv run coldchain-copilot-web          # API on localhost:8000
+cd frontend && npm install && npm run dev   # app on http://localhost:5173
+```
+
+Each answer streams in as it is written. Charts under the answer are chosen in code from the tools the agent called, not by the LLM, and every engine run shows its six steps: the collections it read, the MongoDB feature it used, and how long it took.
+
+![An answer for RF-02: who must act, by when, and why, each cited to its contract article or SOP section](./design/images/screens/answer.png)
+
+The Architecture tab steps through each kind of question. Here, step 4 of *Required actions*: the engine selects the applicable clauses and `$lookup` attaches their text from `knowledge`.
+
+![Architecture tab, step 4 of Required actions: the engine, clauses, and knowledge lit](./design/images/screens/architecture.png)
+
 ---
 
 ## 6. Project Structure
@@ -305,5 +269,7 @@ Start with [`design/architecture.md`](./design/architecture.md), then [`design/w
 | [`design/entities.md`](./design/entities.md) | Collections, document schemas, chunking, seeded data |
 | [`design/ontology.md`](./design/ontology.md) | Classes, relations, measures, rule format, evaluation |
 | [`design/interfaces.md`](./design/interfaces.md) | Tools by level, parameters, return shapes, errors, briefing format |
+| [`design/why-mongodb.md`](./design/why-mongodb.md) | Why one MongoDB instead of five stores, why RAG alone is not enough, and how each kind of data is modeled |
 | [`design/decisions.md`](./design/decisions.md) | Key design decisions, engineering rules, and when to revisit them |
 | [`design/refactoring.md`](./design/refactoring.md) | Stage 6 refactoring plan (working document) |
+| [`design/demo-app.md`](./design/demo-app.md) | Demo web app plan and progress (working document) |
