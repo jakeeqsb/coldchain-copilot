@@ -44,7 +44,7 @@ export type Wire = { d: string; label: string; db?: boolean; at?: [number, numbe
 
 export const WIRES: Record<string, Wire> = {
   q: { d: "M240,83 L328,83", label: "question" },
-  llm: { d: "M550,83 L648,83", label: "tool call / answer" },
+  llm: { d: "M550,83 L648,83", label: "call / answer" },
   gw: { d: "M440,116 L440,178", label: "tool call" },
   tools: { d: "M550,213 L648,213", label: "dispatch" },
   eng: { d: "M800,246 L800,283 L630,283 L630,318", label: "evaluate" },

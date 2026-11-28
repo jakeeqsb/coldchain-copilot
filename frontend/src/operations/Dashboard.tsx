@@ -61,7 +61,7 @@ export function ShipmentDashboard({ card, series, t }: { card: ShipmentCard; ser
       </dl>
       {series ? (
         <>
-          <ShipmentChart series={series} labels={t.dash} />
+          <ShipmentChart series={series} labels={t.dash} width={900} compact />
           <div className="legend">
             <span><i className="lg-temp" />{t.dash.temp}</span>
             <span><i className="lg-hot" />{t.dash.outside}</span>

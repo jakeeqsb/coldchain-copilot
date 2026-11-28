@@ -41,7 +41,7 @@ export default function Architecture({ language, lastRun }: { language: Language
   };
 
   return (
-    <div className="work">
+    <div className="work arch-work">
       <div className="stage">
         <div className="stage-bar">
           <b>Flow</b>
