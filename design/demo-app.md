@@ -151,7 +151,9 @@ language to answer in.
 ### Day 5 · Fixes
 
 - [ ] Fixes found while running the demo questions
-- [x] Visual style: one mono typeface (JetBrains Mono, Noto Sans KR), pale paper, Atlas palette; graph stages stay dark
+- [x] Visual style: one dark theme for the whole app (Atlas Console: slate ground, green grid, corner marks, status lights, live clock); one mono typeface (JetBrains Mono, Noto Sans KR)
+- [x] Home tab: what the copilot does, the fleet now, how it works, questions that open in Operations, the tabs as a route map; an emblem of ontology types drawn as leaves
+- [x] README screenshots retaken in the dark theme, plus Home; the app scales to fit the screen
 - [x] Fleet cards with a container mark; fleet temperature and dashboard restyled
 - [x] Architecture: each flow opens with an overview, then steps through; a clicked component no longer replaces the flow
 - [x] Why MongoDB: five stores against one (diagrams), limits of RAG alone, one modeling story per kind of data, what MongoDB does not do

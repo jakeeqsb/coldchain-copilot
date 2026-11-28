@@ -4,7 +4,7 @@ An operations agent for cold-chain logistics. It reads reefer sensor data, check
 
 *MongoDB Solo Project · Time Series × Vector Search × Ontology × LLM tool calling*
 
-![The demo app's Operations tab: the fleet, RF-02's 24-minute excursion, and the copilot's answer with the engine's six steps](./design/images/screens/operation.png)
+![The demo app's Home tab: what the copilot does, ontology types drawn as connected leaves, and FLEET-01 right now](./design/images/screens/home.png)
 
 ```text
 > Brief me on today's data.
@@ -205,13 +205,17 @@ uv run coldchain-copilot-web          # API on localhost:8000
 cd frontend && npm install && npm run dev   # app on http://localhost:5173
 ```
 
-Each answer streams in as it is written. Charts under the answer are chosen in code from the tools the agent called, not by the LLM, and every engine run shows its six steps: the collections it read, the MongoDB feature it used, and how long it took.
+The Operations tab puts the fleet, each shipment's measurements, and the chat side by side. Answers stream in as they are written, and each one cites the contract article or SOP section it rests on.
 
-![An answer for RF-02: who must act, by when, and why, each cited to its contract article or SOP section](./design/images/screens/answer.png)
+![Operations tab: the fleet, its temperatures, one shipment's measurements, and the copilot answering what RF-02 must do](./design/images/screens/operation.png)
 
-The Architecture tab steps through each kind of question. Here, step 4 of *Required actions*: the engine selects the applicable clauses and `$lookup` attaches their text from `knowledge`.
+Charts under an answer are chosen in code from the tools the agent called, not by the LLM. For an obligations question, that is the deadline timeline and each clause's verdict with the fact and condition behind it; every engine run also shows its six steps.
 
-![Architecture tab, step 4 of Required actions: the engine, clauses, and knowledge lit](./design/images/screens/architecture.png)
+![Obligations for SHP-102: deadlines from the event start, and each clause's verdict with its basis](./design/images/screens/answer.png)
+
+The Architecture tab follows each kind of question through the components and collections, first as an overview and then step by step.
+
+![Architecture tab: the fleet briefing flow lit across the agent, tools, engine, and MongoDB collections](./design/images/screens/architecture.png)
 
 ---
 

@@ -8,12 +8,14 @@ const TEXT = {
     brandSub: "MongoDB operational ontology + AI",
     language: "Language",
     tabs: {
+      home: "Home",
       operations: "Operations",
       ontology: "Ontology",
       architecture: "Architecture",
       why: "Why MongoDB",
     },
     heads: {
+      home: ["Home", ""],
       operations: ["Operations", "Live reefer measurements per shipment, and questions answered from the same data."],
       ontology: ["Ontology", "The types, links, and rules the engine reads, and the entities they connect."],
       architecture: ["Architecture", "Which component reads which collection, step by step, for each kind of question."],
@@ -146,12 +148,14 @@ const TEXT = {
     brandSub: "MongoDB 운영 온톨로지 + AI",
     language: "언어",
     tabs: {
+      home: "홈",
       operations: "운영",
       ontology: "온톨로지",
       architecture: "아키텍처",
       why: "Why MongoDB",
     },
     heads: {
+      home: ["홈", ""],
       operations: ["운영", "배송별 리퍼 측정값과, 같은 데이터로 답하는 질의응답."],
       ontology: ["온톨로지", "엔진이 읽는 타입, 관계, 규칙과 그것들이 잇는 엔터티."],
       architecture: ["아키텍처", "질문 종류마다 어떤 구성 요소가 어떤 컬렉션을 읽는지, 단계별로."],

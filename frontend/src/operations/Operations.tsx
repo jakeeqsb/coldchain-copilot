@@ -26,7 +26,13 @@ export function verdict(results: ClauseResult[]): { kind: Verdict; count: number
 
 export const CHIP: Record<Verdict, string> = { triggered: "t", unresolved: "u", ok: "ok" };
 
-export default function Operations({ t, language, onRun }: { t: Text; language: Language; onRun: (run: LastRun) => void }) {
+export default function Operations({ t, language, onRun, pending, onPendingTaken }: {
+  t: Text;
+  language: Language;
+  onRun: (run: LastRun) => void;
+  pending: string | null;
+  onPendingTaken: () => void;
+}) {
   const [cards, setCards] = useState<ShipmentCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -110,7 +116,7 @@ export default function Operations({ t, language, onRun }: { t: Text; language: 
       </div>
       {/* The chat takes the height of the left column and scrolls inside it. */}
       <div className="chat-cell">
-        <Chat t={t} language={language} series={series} onRun={onRun}
+        <Chat t={t} language={language} series={series} onRun={onRun} pending={pending} onPendingTaken={onPendingTaken}
               shipmentOfReefer={Object.fromEntries((cards ?? []).map((c) => [c.row.reeferId, c.row.shipmentId]))} />
       </div>
       </div>

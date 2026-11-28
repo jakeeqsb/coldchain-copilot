@@ -26,12 +26,15 @@ function newThreadId(): string {
   return `web-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export default function Chat({ t, language, series, shipmentOfReefer, onRun }: {
+export default function Chat({ t, language, series, shipmentOfReefer, onRun, pending, onPendingTaken }: {
   t: Text;
   language: Language;
   series: Record<string, Series>;
   shipmentOfReefer: Record<string, string>;
   onRun: (run: LastRun) => void;
+  /** A question asked from elsewhere (Home); sent once, when nothing is running. */
+  pending: string | null;
+  onPendingTaken: () => void;
 }) {
   const [threadId, setThreadId] = useState(newThreadId);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -80,6 +83,13 @@ export default function Chat({ t, language, series, shipmentOfReefer, onRun }: {
       update((turn) => ({ ...turn, state: "error", error: (error as Error).message }));
     }
   }
+
+  useEffect(() => {
+    if (pending && !running) {
+      onPendingTaken();
+      send(pending);
+    }
+  }, [pending, running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function submit(event: FormEvent) {
     event.preventDefault();
